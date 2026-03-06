@@ -313,7 +313,6 @@ try {
 
         garmentStatus.innerText = "Encrypting & Storing in Private Vault...";
         
-        // PRODUCTION FIX: Mobile Safari safe buffer converter for large images
         let blob;
         try {
             const fetchRes = await fetch(transparentImageUri);
@@ -373,22 +372,29 @@ try {
     }
   });
 
-  // PRODUCTION FIX: Unblockable native fetch bypasses infinite loading spinners
   async function fetchVaultInventory(backgroundOnly = false) {
     if (!backgroundOnly) {
         vaultFeed.innerHTML = '';
         vaultLoader.classList.remove('hidden');
     }
     
+    // PRODUCTION FIX: AbortController Timeout to physically stop infinite loading spinners
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); 
+
     try {
         const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/my_closet?select=*&order=created_at.desc`, {
+            signal: controller.signal,
             headers: {
                 'apikey': CONFIG.SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${globalSession?.access_token}`
+                'Authorization': `Bearer ${globalSession?.access_token || ''}`,
+                'Accept': 'application/json'
             }
         });
         
-        if (!res.ok) throw new Error("Database connection failed");
+        clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error(`Database connection failed (${res.status})`);
         const data = await res.json();
         
         if (!backgroundOnly) vaultLoader.classList.add('hidden');
@@ -459,7 +465,8 @@ try {
     } catch (error) {
         if (!backgroundOnly) {
             vaultLoader.classList.add('hidden');
-            vaultFeed.innerHTML = `<p style="color:#ef4444; grid-column:span 2;">Failed to load inventory: ${error.message}</p>`;
+            let msg = error.name === 'AbortError' ? "Network timeout" : error.message;
+            vaultFeed.innerHTML = `<p style="color:#ef4444; grid-column:span 2; text-align:center;">Failed to load inventory: ${msg}</p>`;
         }
     }
   }
@@ -847,20 +854,27 @@ try {
     }
   });
 
-  // PRODUCTION FIX: Unblockable native fetch bypasses infinite loading spinners
   async function fetchWardrobeHistory() {
     historyFeed.innerHTML = '';
     historyLoader.classList.remove('hidden');
     
+    // PRODUCTION FIX: AbortController Timeout to physically stop infinite loading spinners
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     try {
         const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/wardrobe_analyses?select=*&order=created_at.desc`, {
+            signal: controller.signal,
             headers: {
                 'apikey': CONFIG.SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${globalSession?.access_token}`
+                'Authorization': `Bearer ${globalSession?.access_token || ''}`,
+                'Accept': 'application/json'
             }
         });
         
-        if (!res.ok) throw new Error("Database connection failed");
+        clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error(`Database connection failed (${res.status})`);
         const data = await res.json();
         
         historyLoader.classList.add('hidden');
@@ -934,7 +948,8 @@ try {
         });
     } catch (error) {
         historyLoader.classList.add('hidden');
-        historyFeed.innerHTML = `<p style="color:#ef4444;">Failed to load dossiers: ${error.message}</p>`;
+        let msg = error.name === 'AbortError' ? "Network timeout" : error.message;
+        historyFeed.innerHTML = `<p style="color:#ef4444; text-align:center;">Failed to load dossiers: ${msg}</p>`;
     }
   }
 

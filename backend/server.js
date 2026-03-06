@@ -242,7 +242,6 @@ app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
 // ==========================================
 //   GHOST SIMULATION (ANCHOR PIECE CURATOR)
 // ==========================================
-// PRODUCTION FIX: Restored missing endpoint for Anchor Piece Analysis
 app.post("/api/designer/ghost-simulation", async (req, res, next) => {
   try {
     const { ghostItemImageBase64, ghostItemDescription } = req.body;
@@ -282,6 +281,55 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
             { type: "text", text: "Simulate outfits using this anchor piece and the available wardrobe." }, 
             { type: "image", image: imageBuffer }
           ] 
+        }
+      ],
+      temperature: 0.3,
+    });
+
+    res.json(object);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   CHRONOS AESTHETIC HEATMAP (RESTORED!)
+// ==========================================
+app.get("/api/analytics/chronos", async (req, res, next) => {
+  try {
+    const { data: dossiers, error } = await req.supabase
+      .from("wardrobe_analyses")
+      .select("score, verdict, created_at")
+      .not("score", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (error) throw new Error(error.message);
+    
+    if (!dossiers || dossiers.length < 2) {
+      return res.json({ message: "Not enough data yet. Run at least 2 Stylist evaluations to unlock Chronos." });
+    }
+
+    const ChronosSchema = z.object({
+      chronos: z.object({
+        trajectory: z.enum(["Improving", "Stagnant", "Declining"]),
+        average_score_shift: z.string().describe("e.g., '+5 points' or '-2 points'"),
+        aesthetic_drift: z.string().describe("A 2-sentence analysis of how their style is evolving based on recent verdicts."),
+        course_correction: z.string().describe("1 actionable piece of advice to improve their next look.")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o"),
+      schema: ChronosSchema,
+      messages: [
+        {
+          role: "system",
+          content: `You are EleVate's Chronos AI. Analyze this user's recent outfit scores and verdicts to determine their style evolution: ${JSON.stringify(dossiers)}`
+        },
+        {
+          role: "user",
+          content: "Generate the Chronos Aesthetic Heatmap analysis based on my history."
         }
       ],
       temperature: 0.3,
@@ -390,7 +438,7 @@ app.post("/api/chat", async (req, res, next) => {
     }
 
     let vaultContext = "No wardrobe items available.";
-    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing"].includes(data.mode)) {
+    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
             .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
@@ -428,7 +476,10 @@ app.post("/api/chat", async (req, res, next) => {
       ],
       "what_works": ["Strength 1"],
       "recommendations": ["Upgrade 1"],
-      "missing_pieces": ["Gap 1"]
+      "missing_pieces": ["Gap 1"],
+      "acquisition_list": [
+        { "item": "Navy Blazer", "priority": "High", "reasoning": "Missing anchor piece" }
+      ]
     }`;
 
     const messages = [{ role: "system", content: systemPrompt }];
