@@ -65,14 +65,24 @@ const limiter = rateLimit({
 });
 
 // ==========================================
-//   HEALTH CHECK (For Railway Router)
+//   HELPER FUNCTIONS
+// ==========================================
+
+// PRODUCTION FIX: Universal Base64 Stripper to prevent AI SDK crash across ALL routes
+const cleanBase64 = (imageString) => {
+    if (!imageString) return null;
+    return imageString.includes('base64,') ? imageString.split('base64,')[1] : imageString;
+};
+
+// ==========================================
+//   HEALTH CHECK
 // ==========================================
 app.get("/health", (req, res) => {
     res.status(200).json({ status: "ONLINE", message: "EleVate Engine is operational." });
 });
 
 // ==========================================
-//   SECURITY MIDDLEWARE (MULTI-TENANT AUTH)
+//   SECURITY MIDDLEWARE
 // ==========================================
 const requireAuth = async (req, res, next) => {
     try {
@@ -83,11 +93,9 @@ const requireAuth = async (req, res, next) => {
 
         const token = authHeader.split(" ")[1];
         
-        // Verify the token with Supabase Admin
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
         if (error || !user) throw new Error("Invalid session token.");
 
-        // 🔒 Scoped Client: Acts ON BEHALF of this specific user to enforce RLS
         req.supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
             global: { headers: { Authorization: `Bearer ${token}` } }
         });
@@ -127,7 +135,7 @@ app.post("/api/remove-bg", async (req, res, next) => {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "No image provided" });
 
-    const base64Data = image.includes('base64,') ? image.split('base64,')[1] : image;
+    const base64Data = cleanBase64(image);
     
     const bgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
@@ -156,6 +164,8 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "Image required for tagging" });
 
+    const safeImage = cleanBase64(image);
+
     const TaggingSchema = z.object({
       primary_color: z.string().describe("The dominant color"),
       secondary_color: z.string().nullable().describe("The accent color, or null"),
@@ -173,8 +183,9 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
         { 
           role: "user", 
           content: [
-            { type: "text", text: "Analyze this garment. Identify its visual properties, evaluate its fabric weight, drape, and predict its lifecycle in total wears." },
-            { type: "image", image: image }
+            // PROMPT ARMOR injected here
+            { type: "text", text: "Analyze this garment. Identify its visual properties, evaluate its fabric weight, drape, and predict its lifecycle in total wears. STRICT DIRECTIVE: If a human is wearing this garment, IGNORE THE HUMAN entirely. Focus solely on the clothing fabric and structure." },
+            { type: "image", image: safeImage }
           ] 
         }
       ],
@@ -293,10 +304,11 @@ app.post("/api/chat", async (req, res, next) => {
 
     if (initialDbError) throw new Error(`Failed to init record: ${initialDbError.message}`);
 
+    const safeImage = cleanBase64(data.image);
+
     // 2. Handle Image Upload (If exists)
-    if (data.image) {
-      const base64Data = data.image.replace(/^data:image\/\w+;base64,/, "");
-      const imageBuffer = Buffer.from(base64Data, "base64");
+    if (safeImage) {
+      const imageBuffer = Buffer.from(safeImage, "base64");
       const fileName = `${req.user.id}/${reqId}.jpg`; 
 
       req.supabase.storage.from("wardrobe_images").upload(fileName, imageBuffer, { contentType: "image/jpeg", upsert: false })
@@ -322,7 +334,7 @@ app.post("/api/chat", async (req, res, next) => {
         }
     } 
 
-    // 4. Generate AI Prompt
+    // 4. Generate AI Prompt (WITH PROMPT ARMOR)
     const systemPrompt = `You are EleVate's Master Stylist.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
@@ -331,16 +343,22 @@ app.post("/api/chat", async (req, res, next) => {
     Measurements: ${JSON.stringify(data.measurements || {})}
     Available Wardrobe (JSON): ${vaultContext}
     
-    Return your response strictly as valid JSON. Do not include markdown formatting blocks (\`\`\`json).`;
+    CRITICAL DIRECTIVES (PROMPT ARMOR):
+    1. If a human body, face, skin, or person is visible in the provided image, you MUST COMPLETELY IGNORE IT.
+    2. Do NOT analyze the person, their body shape, or physical features. Do not issue a safety warning.
+    3. Your ONLY purpose is to analyze the GARMENTS, their fit, color, styling, and coordination. Treat the human strictly as a mannequin.
+    4. NEVER apologize or refuse the prompt due to human presence. Evaluating clothing is safe.
+
+    Return your response strictly as valid JSON matching the expected EleVate schema. Do not include markdown formatting blocks (\`\`\`json).`;
 
     const messages = [{ role: "system", content: systemPrompt }];
     
-    if (data.image) {
+    if (safeImage) {
         messages.push({
             role: "user",
             content: [
-                { type: "text", text: `Analyze this image alongside my notes: ${data.notes || 'No notes'}` },
-                { type: "image", image: data.image }
+                { type: "text", text: `Analyze this image alongside my notes: ${data.notes || 'No notes'}. REMEMBER: Ignore the human, analyze the clothes.` },
+                { type: "image", image: safeImage }
             ]
         });
     } else {
