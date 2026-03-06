@@ -114,7 +114,7 @@ const RequestSchema = z.object({
 });
 
 // ==========================================
-//   STUDIO POLISH (WITH PRODUCTION FALLBACK)
+//   STUDIO POLISH 
 // ==========================================
 app.post("/api/remove-bg", async (req, res, next) => {
   try {
@@ -147,7 +147,7 @@ app.post("/api/remove-bg", async (req, res, next) => {
 });
 
 // ==========================================
-//   AUTO-TAGGING (WITH PRODUCTION FALLBACK)
+//   AUTO-TAGGING 
 // ==========================================
 app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
   try {
@@ -197,7 +197,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
 });
 
 // ==========================================
-//   CARE TAG ANALYSIS (WITH PRODUCTION FALLBACK)
+//   CARE TAG ANALYSIS 
 // ==========================================
 app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
   try {
@@ -234,6 +234,60 @@ app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
         console.warn("[Care Tag Warning] Returning defaults:", aiError.message);
         res.json({ careProfile: { instructions: ["Read physical tag"], is_machine_washable: true } });
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   GHOST SIMULATION (ANCHOR PIECE CURATOR)
+// ==========================================
+// PRODUCTION FIX: Restored missing endpoint for Anchor Piece Analysis
+app.post("/api/designer/ghost-simulation", async (req, res, next) => {
+  try {
+    const { ghostItemImageBase64, ghostItemDescription } = req.body;
+    if (!ghostItemImageBase64) return res.status(400).json({ error: "Image required" });
+
+    const safeImage = cleanBase64(ghostItemImageBase64);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    let vaultContext = "No existing wardrobe items available.";
+    const { data: vaultItems } = await req.supabase
+        .from("my_closet")
+        .select("category, notes, primary_color, pattern")
+        .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
+        .limit(50);
+        
+    if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+
+    const GhostSchema = z.object({
+      simulation: z.object({
+        versatility_index: z.number().describe("Score 0-100 on how well this piece integrates."),
+        aesthetic_impact: z.string().describe("A 2-sentence breakdown of how this piece elevates the wardrobe."),
+        sample_outfits: z.array(z.object({
+          outfit_name: z.string(),
+          reasoning: z.string(),
+          existing_categories_used: z.array(z.string())
+        })),
+        missing_pieces: z.array(z.string()).describe("Items the user should buy next to complete the look.")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o"),
+      schema: GhostSchema,
+      messages: [
+        { role: "system", content: `You are EleVate's Master Stylist. Evaluate this new anchor piece (${ghostItemDescription || "Garment"}). Available Wardrobe: ${vaultContext}` },
+        { role: "user", content: [
+            { type: "text", text: "Simulate outfits using this anchor piece and the available wardrobe." }, 
+            { type: "image", image: imageBuffer }
+          ] 
+        }
+      ],
+      temperature: 0.3,
+    });
+
+    res.json(object);
   } catch (error) {
     next(error);
   }
@@ -343,7 +397,6 @@ app.post("/api/chat", async (req, res, next) => {
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // PRODUCTION FIX: Explicit JSON Schema injection with custom dynamic scoring rules
     const systemPrompt = `You are EleVate's Master Stylist.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
@@ -354,7 +407,7 @@ app.post("/api/chat", async (req, res, next) => {
     
     CRITICAL DIRECTIVES:
     1. Ignore any human features in the photo. Focus entirely on the clothing. 
-    2. YOU MUST CALCULATE REAL SCORES based on the garments. Do not output placeholder numbers.
+    2. YOU MUST CALCULATE REAL SCORES based on the garments. DO NOT USE PLACEHOLDER NUMBERS.
     3. TIER CLASSIFICATION SYSTEM: You must strictly assign the "tier" based on your final calculated "score" using this exact scale:
        - 0 to 59 = "Baseline"
        - 60 to 69 = "Functional"
@@ -362,22 +415,21 @@ app.post("/api/chat", async (req, res, next) => {
        - 80 to 89 = "Refined"
        - 90 to 100 = "Elite"
     
-    YOUR OUTPUT MUST BE STRICTLY VALID JSON MATCHING THIS EXACT TEMPLATE (fill in the variables inside the brackets):
+    YOUR OUTPUT MUST BE STRICTLY VALID JSON. DO NOT WRAP IN MARKDOWN. Example structure:
     {
-      "score": <calculate a number between 0 and 100>,
-      "tier": "<assign tier based on the classification scale above>",
-      "verdict": "<A brief summary of the look>",
-      "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
-      "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
-      "styling_notes": ["<Note 1>", "<Note 2>"],
+      "score": 75,
+      "tier": "Intentional",
+      "verdict": "A brief summary of the look.",
+      "archetype": "The Executive",
+      "breakdown": { "color": 15, "occasion": 15, "fit": 15, "cohesion": 15, "presence": 15 },
+      "styling_notes": ["Note 1", "Note 2"],
       "outfit_combinations": [
-        { "name": "<Look Name>", "reasoning": "<Why this works>", "item_urls": ["<url1>"] }
+        { "name": "Look Name", "reasoning": "Why this works", "item_urls": ["url1"] }
       ],
-      "what_works": ["<Strength 1>"],
-      "recommendations": ["<Upgrade 1>"],
-      "missing_pieces": ["<Gap 1>"]
-    }
-    Do not include markdown formatting blocks (\`\`\`json).`;
+      "what_works": ["Strength 1"],
+      "recommendations": ["Upgrade 1"],
+      "missing_pieces": ["Gap 1"]
+    }`;
 
     const messages = [{ role: "system", content: systemPrompt }];
     

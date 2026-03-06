@@ -17,7 +17,6 @@ const supabaseClient = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KE
 });
 
 try {
-  // Global states
   let globalSession = null;
   let currentMode = 'evaluate'; 
   let lastAnalysisData = null;
@@ -50,7 +49,6 @@ try {
                   const ctx = canvas.getContext('2d');
                   ctx.drawImage(img, 0, 0, width, height);
                   
-                  // UNIVERSAL FIX: Strip the "data:image/jpeg;base64," prefix right at the source
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                   const rawBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
                   
@@ -314,8 +312,20 @@ try {
         const { image: transparentImageUri } = await bgRes.json();
 
         garmentStatus.innerText = "Encrypting & Storing in Private Vault...";
-        const fetchRes = await fetch(transparentImageUri);
-        const blob = await fetchRes.blob();
+        
+        // PRODUCTION FIX: Mobile Safari safe buffer converter for large images
+        let blob;
+        try {
+            const fetchRes = await fetch(transparentImageUri);
+            blob = await fetchRes.blob();
+        } catch (mobileError) {
+            const byteString = atob(transparentImageUri.split(',')[1]);
+            const mimeString = transparentImageUri.split(',')[0].split(':')[1].split(';')[0];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+            blob = new Blob([ab], { type: mimeString });
+        }
         
         const fileName = `${globalSession.user.id}/vault_clean_${Math.random().toString(36).substring(2)}.png`;
         
@@ -363,7 +373,7 @@ try {
     }
   });
 
-  // PRODUCTION FIX: Bypass Supabase SDK freeze using native unblockable fetch
+  // PRODUCTION FIX: Unblockable native fetch bypasses infinite loading spinners
   async function fetchVaultInventory(backgroundOnly = false) {
     if (!backgroundOnly) {
         vaultFeed.innerHTML = '';
@@ -837,7 +847,7 @@ try {
     }
   });
 
-  // PRODUCTION FIX: Bypass Supabase JS library freeze by using native REST fetch
+  // PRODUCTION FIX: Unblockable native fetch bypasses infinite loading spinners
   async function fetchWardrobeHistory() {
     historyFeed.innerHTML = '';
     historyLoader.classList.remove('hidden');
