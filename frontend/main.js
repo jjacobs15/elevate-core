@@ -25,7 +25,7 @@ try {
   let cachedVaultInventory = []; 
   let parsedCareTagData = null; 
 
-  // PRODUCTION UPDATE: Added strict error rejections to prevent silent hangs on corrupt/HEIC images
+  // PRODUCTION UPDATE: Added Universal Base64 Stripping & strict error rejections
   function compressImage(file, maxSize = 1200) {
       return new Promise((resolve, reject) => {
           if (!file) return reject(new Error("No file provided."));
@@ -51,7 +51,12 @@ try {
                   const ctx = canvas.getContext('2d');
                   ctx.drawImage(img, 0, 0, width, height);
                   
-                  resolve(canvas.toDataURL('image/jpeg', 0.8));
+                  // UNIVERSAL FIX: Strip the "data:image/jpeg;base64," prefix right at the source
+                  // This guarantees ALL backend routes receive pure, crash-proof base64 data
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                  const rawBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+                  
+                  resolve(rawBase64);
               };
               
               img.onerror = () => reject(new Error("Invalid image format. Please upload a standard JPG or PNG file."));
@@ -525,10 +530,7 @@ try {
     btn.disabled = true;
 
     try {
-        let base64Image = await compressImage(file);
-        
-        // PRODUCTION UPDATE: Strip data URI prefix to save bandwidth
-        if (base64Image.includes(',')) base64Image = base64Image.split(',')[1];
+        const base64Image = await compressImage(file);
 
         const res = await secureFetch('/api/designer/ghost-simulation', {
           method: 'POST',
@@ -1181,18 +1183,12 @@ try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 180000); 
 
-    // PRODUCTION UPDATE: Strip base64 prefix to save bandwidth
-    let safeImage = base64;
-    if (safeImage && safeImage.includes(',')) {
-        safeImage = safeImage.split(',')[1];
-    }
-    
     try {
         const response = await secureFetch('/api/chat', { 
             method: 'POST',
             signal: controller.signal,
             body: {
-                image: safeImage, 
+                image: base64, // Universally pure base64
                 mode: activeApiMode,
                 occasion: selectedOccasion || "General",
                 notes: finalNotes, 
