@@ -138,7 +138,6 @@ app.post("/api/remove-bg", async (req, res, next) => {
         const data = await bgRes.json();
         return res.json({ image: `data:image/png;base64,${data.data.result_b64}` });
     } catch (bgError) {
-        // PRODUCTION FIX: If Remove.bg fails, don't crash. Fallback to original image.
         console.warn("[RemoveBG Warning] Falling back to original image:", bgError.message);
         return res.json({ image: `data:image/jpeg;base64,${base64Data}` });
     }
@@ -185,7 +184,6 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
         });
         res.json({ success: true, tags: object });
     } catch (aiError) {
-        // PRODUCTION FIX: Prevent upload crash if AI filters trip
         console.warn("[Auto-Tag Warning] Returning default tags:", aiError.message);
         res.json({ success: true, tags: {
             primary_color: "Unknown", secondary_color: null, pattern: "Solid",
@@ -345,7 +343,7 @@ app.post("/api/chat", async (req, res, next) => {
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // PRODUCTION FIX: Explicit JSON Schema injection so it NEVER returns 0 or fails parsing
+    // PRODUCTION FIX: Explicit JSON Schema injection with custom dynamic scoring rules
     const systemPrompt = `You are EleVate's Master Stylist.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
@@ -356,21 +354,28 @@ app.post("/api/chat", async (req, res, next) => {
     
     CRITICAL DIRECTIVES:
     1. Ignore any human features in the photo. Focus entirely on the clothing. 
+    2. YOU MUST CALCULATE REAL SCORES based on the garments. Do not output placeholder numbers.
+    3. TIER CLASSIFICATION SYSTEM: You must strictly assign the "tier" based on your final calculated "score" using this exact scale:
+       - 0 to 59 = "Baseline"
+       - 60 to 69 = "Functional"
+       - 70 to 79 = "Intentional"
+       - 80 to 89 = "Refined"
+       - 90 to 100 = "Elite"
     
-    YOUR OUTPUT MUST BE STRICTLY VALID JSON MATCHING THIS EXACT STRUCTURE:
+    YOUR OUTPUT MUST BE STRICTLY VALID JSON MATCHING THIS EXACT TEMPLATE (fill in the variables inside the brackets):
     {
-      "score": 85,
-      "tier": "Vanguard",
-      "verdict": "A brief summary of the look.",
-      "archetype": "The Executive",
-      "breakdown": { "color": 18, "occasion": 17, "fit": 15, "cohesion": 19, "presence": 16 },
-      "styling_notes": ["Note 1", "Note 2"],
+      "score": <calculate a number between 0 and 100>,
+      "tier": "<assign tier based on the classification scale above>",
+      "verdict": "<A brief summary of the look>",
+      "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
+      "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
+      "styling_notes": ["<Note 1>", "<Note 2>"],
       "outfit_combinations": [
-        { "name": "Look Name", "reasoning": "Why this works", "item_urls": ["url1"] }
+        { "name": "<Look Name>", "reasoning": "<Why this works>", "item_urls": ["<url1>"] }
       ],
-      "what_works": ["Strength 1"],
-      "recommendations": ["Upgrade 1"],
-      "missing_pieces": ["Gap 1"]
+      "what_works": ["<Strength 1>"],
+      "recommendations": ["<Upgrade 1>"],
+      "missing_pieces": ["<Gap 1>"]
     }
     Do not include markdown formatting blocks (\`\`\`json).`;
 
