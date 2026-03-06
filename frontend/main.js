@@ -328,26 +328,50 @@ try {
         
         const fileName = `${globalSession.user.id}/vault_clean_${Math.random().toString(36).substring(2)}.png`;
         
-        const { data: uploadData, error: uploadError } = await supabaseClient.storage
-          .from('wardrobe_images')
-          .upload(fileName, blob, { contentType: 'image/png' });
+        // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock with Native Storage Fetch
+        const uploadRes = await fetch(`${CONFIG.SUPABASE_URL}/storage/v1/object/wardrobe_images/${fileName}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${globalSession.access_token}`,
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Content-Type': blob.type
+            },
+            body: blob
+        });
 
-        if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
-        const { data: { publicUrl } } = supabaseClient.storage.from('wardrobe_images').getPublicUrl(fileName);
-
-        const { error: dbError } = await supabaseClient.from('my_closet').insert([{ 
-          image_url: publicUrl, 
-          category: cat, 
-          notes: notes,
-          price: price, 
-          wear_count: 0,
-          total_wears: 0,
-          status: 'CLEAN',
-          care_instructions: parsedCareTagData,
-          ...fabricData 
-        }]);
+        if (!uploadRes.ok) {
+            const errText = await uploadRes.text();
+            throw new Error(`Upload failed: ${errText}`);
+        }
         
-        if (dbError) throw new Error(`Database save failed: ${dbError.message}`);
+        const publicUrl = `${CONFIG.SUPABASE_URL}/storage/v1/object/public/wardrobe_images/${fileName}`;
+
+        // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock with Native Database Insert
+        const dbRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/my_closet`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${globalSession.access_token}`,
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+                image_url: publicUrl,
+                category: cat,
+                notes: notes,
+                price: price,
+                wear_count: 0,
+                total_wears: 0,
+                status: 'CLEAN',
+                care_instructions: parsedCareTagData,
+                ...fabricData
+            })
+        });
+
+        if (!dbRes.ok) {
+            const errText = await dbRes.text();
+            throw new Error(`Database save failed: ${errText}`);
+        }
 
         garmentStatus.innerText = "Wardrobe Updated Successfully.";
         setTimeout(() => {
@@ -378,7 +402,6 @@ try {
         vaultLoader.classList.remove('hidden');
     }
     
-    // PRODUCTION FIX: AbortController Timeout to physically stop infinite loading spinners
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000); 
 
@@ -737,17 +760,27 @@ try {
   window.closeGenericModal = function() { document.getElementById('genericModal').classList.remove('active'); };
   document.getElementById('genericModal').addEventListener('click', (e) => { if (e.target === document.getElementById('genericModal')) closeGenericModal(); });
 
+  // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock for deletions
   window.deleteVaultItem = async function(id) {
     if (!confirm("Remove this item from your Wardrobe?")) return;
     const el = document.getElementById(`vault-${id}`);
     if (el) el.style.opacity = '0.5';
-    const { error } = await supabaseClient.from('my_closet').delete().eq('id', id);
-    if (error) {
-      alert("Failed to delete: " + error.message);
-      if (el) el.style.opacity = '1'; 
-    } else {
-      if (el) el.remove(); 
-      if (vaultFeed.children.length === 0) fetchVaultInventory();
+    
+    try {
+        const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/my_closet?id=eq.${id}`, {
+            method: 'DELETE',
+            headers: {
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${globalSession?.access_token}`
+            }
+        });
+        
+        if (!res.ok) throw new Error("Delete failed");
+        if (el) el.remove(); 
+        if (vaultFeed.children.length === 0) fetchVaultInventory();
+    } catch (error) {
+        alert("Failed to delete: " + error.message);
+        if (el) el.style.opacity = '1'; 
     }
   };
 
@@ -858,7 +891,6 @@ try {
     historyFeed.innerHTML = '';
     historyLoader.classList.remove('hidden');
     
-    // PRODUCTION FIX: AbortController Timeout to physically stop infinite loading spinners
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
 
@@ -963,13 +995,27 @@ try {
       document.getElementById('genericModal').classList.add('active');
   };
 
+  // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock for deletions
   window.deleteDossier = async function(id) {
     if (!confirm("Delete this dossier?")) return;
     const itemCard = document.getElementById(`dossier-${id}`);
     if (itemCard) itemCard.style.opacity = '0.5';
-    const { error } = await supabaseClient.from('wardrobe_analyses').delete().eq('id', id);
-    if (error) { alert("Failed to delete: " + error.message); if (itemCard) itemCard.style.opacity = '1'; } 
-    else { if (itemCard) itemCard.remove(); }
+    
+    try {
+        const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/wardrobe_analyses?id=eq.${id}`, {
+            method: 'DELETE',
+            headers: {
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${globalSession?.access_token}`
+            }
+        });
+        
+        if (!res.ok) throw new Error("Delete failed");
+        if (itemCard) itemCard.remove();
+    } catch (error) {
+        alert("Failed to delete: " + error.message);
+        if (itemCard) itemCard.style.opacity = '1';
+    }
   };
 
   uploadTrigger.addEventListener('click', () => imageInput.click());
