@@ -17,7 +17,8 @@ const supabaseClient = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KE
 });
 
 try {
-  let currentMode = 'morning_briefing'; 
+  // UX UPDATE: Default to Evaluate (Consult Stylist) instead of Morning Briefing
+  let currentMode = 'evaluate'; 
   let lastAnalysisData = null;
   let cachedDossierHistory = []; 
   let cachedVaultInventory = []; 
@@ -54,8 +55,8 @@ try {
       });
   }
   
+  // FIXED: Removed the aggressive 4-second timeout to prevent connection drops
   async function secureFetch(endpoint, options = {}) {
-      // Ask Supabase for the session without an aggressive 4-second timeout
       const { data: { session }, error } = await supabaseClient.auth.getSession();
 
       if (error || !session) {
@@ -72,7 +73,6 @@ try {
           if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
       }
 
-      // Route the request to your Railway backend
       const response = await fetch(`${CONFIG.BACKEND_URL}${endpoint}`, { ...options, headers });
       
       if (!response.ok) {
@@ -193,7 +193,11 @@ try {
       const todayStr = new Date().toISOString().split('T')[0];
       document.getElementById('evalDate').value = todayStr;
       document.getElementById('targetDate').value = todayStr;
-      updateTailorUI();
+      
+      // UX UPDATE: Force the UI to initialize in the Evaluate tab on load
+      const evalBtn = document.getElementById('btn-evaluate');
+      if (evalBtn) evalBtn.click();
+      
     } catch (e) { console.warn("Initialization logic err."); }
   });
 
