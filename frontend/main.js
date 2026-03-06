@@ -18,6 +18,7 @@ const supabaseClient = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KE
 
 try {
   // UX UPDATE: Default to Evaluate (Consult Stylist) instead of Morning Briefing
+  let globalSession = null;
   let currentMode = 'evaluate'; 
   let lastAnalysisData = null;
   let cachedDossierHistory = []; 
@@ -57,14 +58,13 @@ try {
   
   // FIXED: Removed the aggressive 4-second timeout to prevent connection drops
   async function secureFetch(endpoint, options = {}) {
-      const { data: { session }, error } = await supabaseClient.auth.getSession();
-
-      if (error || !session) {
+      // Bypass getSession() entirely and use the cached token
+      if (!globalSession || !globalSession.access_token) {
           throw new Error("Authentication required. Please sign out and log back in.");
       }
 
       const headers = {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${globalSession.access_token}`,
           ...(options.headers || {})
       };
 
@@ -112,6 +112,7 @@ try {
   }
 
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      globalSession = session; // <-- ADD THIS LINE
       const authOverlay = document.getElementById('authOverlay');
       if (session) {
           authOverlay.classList.add('hidden');
