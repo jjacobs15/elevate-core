@@ -8,9 +8,9 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.1",
+    "@ai-sdk/openai": "^3.0.41",
     "@supabase/supabase-js": "^2.0.0",
-    "ai": "^3.0.0",
+    "ai": "^6.0.116",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
