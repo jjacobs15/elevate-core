@@ -68,7 +68,6 @@ const limiter = rateLimit({
 //   HELPER FUNCTIONS
 // ==========================================
 
-// PRODUCTION FIX: Universal Base64 Stripper to prevent AI SDK crash across ALL routes
 const cleanBase64 = (imageString) => {
     if (!imageString) return null;
     return imageString.includes('base64,') ? imageString.split('base64,')[1] : imageString;
@@ -165,6 +164,8 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
     if (!image) return res.status(400).json({ error: "Image required for tagging" });
 
     const safeImage = cleanBase64(image);
+    // PRODUCTION FIX: Must wrap in Buffer for AI SDK
+    const imageBuffer = Buffer.from(safeImage, "base64");
 
     const TaggingSchema = z.object({
       primary_color: z.string().describe("The dominant color"),
@@ -183,9 +184,8 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
         { 
           role: "user", 
           content: [
-            // PROMPT ARMOR injected here
             { type: "text", text: "Analyze this garment. Identify its visual properties, evaluate its fabric weight, drape, and predict its lifecycle in total wears. STRICT DIRECTIVE: If a human is wearing this garment, IGNORE THE HUMAN entirely. Focus solely on the clothing fabric and structure." },
-            { type: "image", image: safeImage }
+            { type: "image", image: imageBuffer } // Fixed parameter
           ] 
         }
       ],
@@ -193,6 +193,45 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
     });
 
     res.json({ success: true, tags: object });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   CARE TAG ANALYSIS (RESTORED ENDPOINT)
+// ==========================================
+app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Image required for care tag analysis" });
+
+    const safeImage = cleanBase64(image);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    const CareTagSchema = z.object({
+      careProfile: z.object({
+        instructions: z.array(z.string()).describe("List of care instructions found on tag"),
+        is_machine_washable: z.boolean().describe("True if machine washing is allowed")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o-mini"),
+      schema: CareTagSchema,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Read this clothing care tag. Extract washing and drying instructions into an array. Determine if it is machine washable." },
+            { type: "image", image: imageBuffer }
+          ]
+        }
+      ],
+      temperature: 0.1,
+    });
+
+    res.json(object);
   } catch (error) {
     next(error);
   }
@@ -354,11 +393,13 @@ app.post("/api/chat", async (req, res, next) => {
     const messages = [{ role: "system", content: systemPrompt }];
     
     if (safeImage) {
+        // PRODUCTION FIX: Convert string to Buffer for AI SDK
+        const aiBuffer = Buffer.from(safeImage, "base64");
         messages.push({
             role: "user",
             content: [
                 { type: "text", text: `Analyze this image alongside my notes: ${data.notes || 'No notes'}. REMEMBER: Ignore the human, analyze the clothes.` },
-                { type: "image", image: safeImage }
+                { type: "image", image: aiBuffer } 
             ]
         });
     } else {
