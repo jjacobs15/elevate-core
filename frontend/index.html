@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <title>EleVate | For the Intentional Man</title>
+  <meta name="description" content="High-end styling, digital tailoring, and wardrobe analytics for the intentional man.">
+  <meta name="theme-color" content="#050A15">
+  
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👔</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    html { scroll-behavior: smooth; }
+    :root {
+      --bg-deep: #050A15; --panel-navy: #0B1426; --accent-gold: #C5A059;
+      --accent-blue: #1E3A8A; --text-main: #F8FAFC; --text-muted: #64748B;
+      --glass-border: rgba(197, 160, 89, 0.15);
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: var(--bg-deep); color: var(--text-main);
+      display: flex; justify-content: center; padding: 40px 20px; margin: 0; min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    #crash-banner { display: none; position: fixed; top: 0; left: 0; width: 100%; background: #ef4444; color: white; text-align: center; padding: 12px; font-weight: bold; z-index: 9999; font-size: 14px; }
+    
+    .container {
+      background: var(--panel-navy); padding: 56px; border-radius: 4px;
+      width: 480px; max-width: 100%; border: 1px solid var(--glass-border); position: relative;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.8); margin-top: 20px; box-sizing: border-box;
+    }
+    
+    .brand { text-align: center; margin-bottom: 20px; position: relative; }
+    .brand h1 { font-family: 'Cinzel'; font-size: 42px; letter-spacing: 6px; margin: 0; text-transform: uppercase; background: linear-gradient(180deg, #FFFFFF 0%, #A5A5A5 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    
+    #logoutBtn { position: absolute; top: 0; right: 0; background: transparent; border: 1px solid var(--glass-border); color: var(--text-muted); padding: 5px 10px; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; transition: 0.3s; }
+    #logoutBtn:hover { color: #ef4444; border-color: #ef4444; }
+
+    /* --- AUTHENTICATION GATEWAY STYLES --- */
+    .auth-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-deep);
+      display: flex; justify-content: center; align-items: center; z-index: 5000;
+      transition: opacity 0.5s ease;
+    }
+    .auth-overlay.hidden { opacity: 0; pointer-events: none; }
+    .auth-box { background: var(--panel-navy); border: 1px solid var(--accent-gold); padding: 50px; text-align: center; width: 350px; border-radius: 4px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); }
+    .auth-btn { width: 100%; padding: 16px; margin-top: 15px; border: 1px solid var(--glass-border); background: #020617; color: white; cursor: pointer; text-transform: uppercase; font-size: 11px; font-weight: 700; letter-spacing: 2px; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .auth-btn:hover { border-color: var(--accent-gold); background: rgba(197, 160, 89, 0.1); }
+
+    /* --- UI STYLES --- */
+    .nav-tabs { display: flex; gap: 10px; margin-bottom: 30px; border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; }
+    .nav-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px; font-size: 10px; font-weight: 700; cursor: pointer; padding: 10px; transition: 0.3s; }
+    .nav-btn.active { color: var(--accent-gold); border-bottom: 2px solid var(--accent-gold); }
+    
+    .ledger-drawer { background: #020617; border: 1px solid var(--glass-border); padding: 16px; margin-bottom: 24px; border-radius: 2px; }
+    .ledger-drawer summary { font-size: 10px; color: var(--accent-gold); cursor: pointer; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+    .ledger-drawer summary::after { content: '＋'; font-size: 12px; }
+    .ledger-drawer[open] summary::after { content: '－'; }
+    .ledger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+    .ledger-field { display: flex; flex-direction: column; gap: 4px; }
+    .ledger-input { background: #050A15; border: 1px solid #1e293b; color: white; padding: 8px; font-size: 12px; border-radius: 2px; outline: none; margin-top: 0 !important; width: 100%; box-sizing: border-box;}
+    .ledger-input:focus { border-color: var(--accent-gold); }
+    
+    .mode-toggle { display: flex; background: #020617; padding: 4px; border-radius: 2px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.05); }
+    .mode-btn { flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; transition: 0.3s; }
+    .mode-btn.active { background: var(--accent-blue); color: white; }
+    
+    .sub-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+    .sub-btn { padding: 10px; border: 1px solid rgba(255,255,255,0.1); text-align: center; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); cursor: pointer; transition: 0.3s; border-radius: 2px; font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 55px;}
+    .sub-btn.active { border-color: var(--accent-gold); color: var(--accent-gold); background: rgba(197, 160, 89, 0.05); }
+    .sub-desc { font-size: 7.5px; font-weight: 400; text-transform: none; letter-spacing: 0.5px; opacity: 0.8; margin-top: 5px; color: var(--text-muted); transition: 0.3s; }
+    .sub-btn.active .sub-desc { color: var(--accent-gold); opacity: 0.9; }
+    
+    input, select, textarea { width: 100%; padding: 16px; margin-top: 16px; background: #020617; color: white; border: 1px solid #1e293b; border-radius: 2px; box-sizing: border-box; outline: none; }
+    input:focus, select:focus { border-color: var(--accent-gold); }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8) sepia(1) saturate(3) hue-rotate(180deg); cursor: pointer; }
+    input[type="range"] { -webkit-appearance: none; background: #020617; border: 1px solid var(--glass-border); height: 6px; border-radius: 4px; outline: none; padding: 0; margin-top: 10px; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-gold); cursor: pointer; box-shadow: 0 0 10px rgba(197, 160, 89, 0.5); }
+    
+    .upload-btn { width: 100%; padding: 18px; border: 1px solid var(--accent-gold); background: transparent; color: var(--text-main); cursor: pointer; margin-top: 10px; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; transition: 0.3s; }
+    .upload-btn:hover { background: var(--accent-gold); color: var(--bg-deep); }
+    
+    #evaluateBtn, #saveGarmentBtn { width: 100%; background: linear-gradient(135deg, #1E40AF 0%, #1E3A8A 100%); color: white; padding: 20px; border: none; margin-top: 32px; cursor: pointer; font-weight: 700; text-transform: uppercase; letter-spacing: 3px; }
+    #evaluateBtn:disabled, #saveGarmentBtn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+    
+    .result { margin-top: 40px; padding: 32px; background: #020617; border: 1px solid var(--glass-border); animation: fadeIn 0.6s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .score-badge { text-align: center; margin-bottom: 30px; }
+    .score-num { font-family: 'Cinzel'; font-size: 64px; line-height: 1; margin-bottom: 5px; transition: color 0.3s ease; }
+    .label { color: var(--accent-gold); font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; font-weight: 800; }
+    .card { background: rgba(197, 160, 89, 0.05); padding: 20px; border: 1px solid var(--glass-border); margin-top: 15px; }
+    .body-text { font-size: 14px; color: #e2e8f0; line-height: 1.5; margin-bottom: 4px; display: block; }
+    .list-item { font-size: 13px; color: #cbd5e1; margin-bottom: 6px; display: block; line-height: 1.4; }
+    .hidden { display: none !important; }
+    .image-frame { margin-top: 20px; padding: 8px; background: rgba(197, 160, 89, 0.03); border: 1px solid var(--glass-border); border-radius: 4px; }
+    #imagePreview, #garmentPreview, #careTagPreview, #ghostPreview { width: 100%; height: 380px; object-fit: cover; object-position: top; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2); display: block; }
+    
+    .loader-container { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px 0; }
+    .spinner { width: 40px; height: 40px; border: 2px solid rgba(197, 160, 89, 0.1); border-top-color: var(--accent-gold); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .loading-text { color: var(--accent-gold); font-size: 11px; letter-spacing: 3px; text-transform: uppercase; font-weight: 600; text-align: center; }
+    
+    .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+    .breakdown-item { background: rgba(197, 160, 89, 0.04); border: 1px solid var(--glass-border); padding: 12px; }
+    .breakdown-header { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+    .breakdown-score { color: var(--accent-gold); font-weight: 700; }
+    .bar { width: 100%; height: 6px; background: #020617; border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #C5A059, #E6C77A); transition: width 0.8s ease; }
+    .tier { text-align: center; margin-top: 6px; font-size: 12px; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; }
+    
+    .history-grid { display: flex; flex-direction: column; gap: 16px; }
+    .history-item { display: flex; gap: 16px; background: #020617; border: 1px solid var(--glass-border); padding: 12px; border-radius: 4px; position: relative; transition: all 0.3s; align-items: stretch; cursor: pointer; }
+    .history-item:hover { border-color: var(--accent-gold); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .history-item img { width: 110px; height: 140px; object-fit: cover; object-position: top; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2); }
+    .history-content { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+    .history-meta { display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; border-bottom: 1px solid rgba(197, 160, 89, 0.1); padding-bottom: 8px; }
+    .history-verdict { font-size: 11px; color: #e2e8f0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .history-score-block { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px;}
+    .history-score { font-family: 'Cinzel'; font-size: 32px; line-height: 0.8; }
+    .delete-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; font-size: 14px; font-weight: bold; opacity: 0.6; transition: 0.2s; padding: 0 5px; }
+    .delete-btn:hover { opacity: 1; transform: scale(1.2); }
+    
+    .vault-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px;}
+    .vault-item { background: rgba(197, 160, 89, 0.05); border: 1px solid var(--glass-border); border-radius: 4px; padding: 10px; position: relative; cursor: pointer; transition: 0.2s; overflow: hidden;}
+    .vault-item:hover { border-color: var(--accent-gold); }
+    .vault-item img { width: 100%; height: 150px; object-fit: cover; border-radius: 2px;}
+    .vault-meta { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 8px;}
+    .vault-notes { font-size: 11px; color: #e2e8f0; margin-top: 4px;}
+    
+    .status-dot { position: absolute; top: 18px; left: 18px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #0B1426; box-shadow: 0 2px 5px rgba(0,0,0,0.5); z-index: 10; }
+    .status-clean { background-color: #10B981; }
+    .status-worn { background-color: #EAB308; }
+    .status-care { background-color: #EF4444; animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+    
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; padding: 20px; }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal-content { background: var(--panel-navy); border: 1px solid var(--glass-border); padding: 40px; border-radius: 4px; width: 100%; max-width: 500px; max-height: 85vh; overflow-y: auto; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.9); }
+    .modal-close { position: absolute; top: 15px; right: 20px; background: transparent; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; transition: 0.3s; }
+    .modal-close:hover { color: white; transform: rotate(90deg); }
+    
+    .action-btn { background: transparent; border: 1px solid var(--accent-gold); color: var(--accent-gold); padding: 12px; cursor: pointer; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 1px; transition: 0.2s; width: 100%; margin-top: 10px;}
+    .action-btn:hover { background: var(--accent-gold); color: var(--bg-deep); }
+    .action-btn.danger { border-color: #ef4444; color: #ef4444; }
+    .action-btn.danger:hover { background: #ef4444; color: white; }
+    
+    .week-grid { display: flex; overflow-x: auto; gap: 15px; padding-bottom: 10px; margin-top: 15px; scroll-snap-type: x mandatory; }
+    .day-card { background: #020617; border: 1px solid var(--glass-border); padding: 15px; border-radius: 4px; min-width: 220px; scroll-snap-align: start; flex-shrink: 0; }
+    .day-header { color: var(--accent-gold); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; margin-bottom: 10px; border-bottom: 1px solid rgba(197, 160, 89, 0.1); padding-bottom: 5px;}
+    .day-body { font-size: 11px; color: #cbd5e1; line-height: 1.4; margin-bottom: 12px; }
+    .day-items { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .day-items img { width: 100%; height: 110px; object-fit: cover; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2); }
+  </style>
+</head>
+<body>
+
+<div id="crash-banner">CRITICAL ERROR: Please see console.</div>
+
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-box">
+    <h1 style="font-family: 'Cinzel'; font-size: 36px; margin: 0; color: white; letter-spacing: 4px;">EleVate</h1>
+    <p style="color: var(--accent-gold); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 30px;">For the Intentional Man</p>
+    
+    <button id="appleLoginBtn" class="auth-btn" aria-label="Sign in with Apple">
+      <svg width="16" height="16" viewBox="0 0 384 512" fill="white"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+      Continue with Apple
+    </button>
+    <button id="googleLoginBtn" class="auth-btn" aria-label="Sign in with Google">
+      <svg width="16" height="16" viewBox="0 0 488 512" fill="white"><path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"/></svg>
+      Continue with Google
+    </button>
+    
+    <div id="authErrorMsg" style="color: #ef4444; font-size: 10px; margin-top: 15px; display: none;"></div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="brand">
+    <h1>EleVate</h1>
+    <div style="font-size: 10px; color: var(--accent-gold); letter-spacing: 4px; text-transform: uppercase; margin-top: 10px;">For the Intentional Man</div>
+    <button id="logoutBtn">Sign Out</button>
+  </div>
+
+  <div class="nav-tabs">
+    <button class="nav-btn active" id="tab-analysis">The Designer</button>
+    <button class="nav-btn" id="tab-vault">My Wardrobe</button>
+    <button class="nav-btn" id="tab-wardrobe">My Profile History</button>
+  </div>
+
+  <div id="analysisView">
+    <details class="ledger-drawer">
+      <summary>Master's Ledger (Silhouette ID)</summary>
+      <div class="ledger-grid">
+        <div class="ledger-field"><label class="label" style="margin-bottom:0">Chest (in)</label><input type="number" id="m_chest" class="ledger-input" placeholder="e.g. 40"></div>
+        <div class="ledger-field"><label class="label" style="margin-bottom:0">Inseam (in)</label><input type="number" id="m_inseam" class="ledger-input" placeholder="e.g. 32"></div>
+        <div class="ledger-field"><label class="label" style="margin-bottom:0">Waist (in)</label><input type="number" id="m_waist" class="ledger-input" placeholder="e.g. 34"></div>
+        <div class="ledger-field"><label class="label" style="margin-bottom:0">Height</label><input type="text" id="m_height" class="ledger-input" placeholder="e.g. 6'1"></div>
+      </div>
+    </details>
+
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="btn-evaluate">Evaluate</button>
+      <button class="mode-btn" id="btn-tailor-base">Digital Tailor</button>
+    </div>
+
+    <div id="tailorSubMenu" class="sub-toggle hidden">
+      <label class="sub-btn active" style="grid-column: span 2; border-color: var(--accent-gold); background: rgba(197, 160, 89, 0.1);"><input type="radio" name="tailorMode" value="morning_briefing" checked class="hidden"> <span style="font-size: 11px;">The Morning Briefing</span><span class="sub-desc" style="color: var(--text-main);">Zero-Click Daily Look</span></label>
+      <label class="sub-btn"><input type="radio" name="tailorMode" value="fit" class="hidden"> <span>The Vogue Style</span><span class="sub-desc">Proportion & Fit</span></label>
+      <label class="sub-btn"><input type="radio" name="tailorMode" value="wardrobe_planner" class="hidden"> <span>The Master Planner</span><span class="sub-desc">Days, Weeks & Trips</span></label>
+    </div>
+
+    <input type="hidden" id="evalDate" />
+    <input type="file" id="imageInput" accept="image/*" class="hidden" />
+    <button class="upload-btn" id="uploadTrigger" class="hidden">Submit Silhouette</button>
+    <div id="tailorInstructions" class="hidden" style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:10px; line-height: 1.5;"></div>
+    <div id="vaultConnectionStatus" class="hidden" style="font-size:10px; text-align:center; margin-top:10px; padding:8px; background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:2px;"></div>
+    <div id="imageFrame" class="image-frame hidden"><img id="imagePreview" alt="Uploaded Silhouette Preview" /></div>
+
+    <div id="selectionBlock" class="hidden">
+      <div id="plannerBlock" class="hidden" style="margin-top: 16px;">
+        <select id="plannerType" style="margin-top: 0; border-color: var(--accent-gold); color: var(--accent-gold); font-weight: 700;">
+          <option value="1_day">Plan: 1-Day Event / Outfit</option>
+          <option value="work_week">Plan: 5-Day Office Week</option>
+          <option value="vacation">Plan: 1-Week Vacation</option>
+          <option value="work_trip">Plan: 1-Week Work Trip</option>
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 16px; align-items: flex-start;">
+        <div style="flex: 1;">
+            <select id="contrastProfile" style="width: 100%; margin-top: 0;" title="Contrast Profile">
+              <option value="High Contrast">Contrast: High</option>
+              <option value="Low Contrast (Deep)">Contrast: Low Deep</option>
+              <option value="Low Contrast (Light)">Contrast: Low Light</option>
+              <option value="Medium Contrast">Contrast: Medium</option>
+              <option value="Silver/Salt & Pepper">Contrast: Silver</option>
+            </select>
+        </div>
+        <input type="text" id="climate" placeholder="City (e.g. Miami)" style="flex: 1; margin-top: 0;" title="Enter a city for Live Climate Intelligence" />
+      </div>
+
+      <div id="buildDateBlock" class="hidden" style="margin-top: 16px;">
+        <label id="targetDateLabel" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Target Date</label>
+        <input type="date" id="targetDate" style="margin-top: 4px;" />
+      </div>
+
+      <div id="travelInputs" class="hidden" style="margin-top: 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; gap: 10px;">
+          <div style="flex: 1;"><label style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Departure</label><input type="date" id="departureDate" style="margin-top: 4px;" /></div>
+          <div style="flex: 1;"><label style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Return</label><input type="date" id="returnDate" style="margin-top: 4px;" /></div>
+        </div>
+        <input type="text" id="travelItinerary" placeholder="Itinerary (e.g. 5 days, Skiing & Upscale Dinners)" style="margin-top: 0;" />
+      </div>
+
+      <div id="occasionBlock">
+          <select id="category" style="margin-top: 16px;">
+            <option value="">Select Target Occasion</option>
+            <option>Activity / Outdoor</option>
+            <option>Casual / Everyday</option>
+            <option>Formal</option>
+            <option>Professional</option>
+            <option>Seasonal / Holiday</option>
+            <option>Social</option>
+            <option>Travel</option>
+            <option>Other</option>
+          </select>
+          <select id="occasion" disabled><option value="">Select Occasion</option></select>
+          <input type="text" id="customOccasion" placeholder="Please specify occasion" class="hidden" />
+
+          <div style="margin-top: 24px; padding: 16px; background: #020617; border: 1px solid var(--glass-border); border-radius: 2px;">
+            <label style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Desired Vibe: <span id="moodLabel" style="color: var(--accent-gold); font-weight: 700;">Balanced</span></label>
+            <input type="range" id="moodSlider" min="1" max="3" value="2" style="width: 100%; margin-top: 12px;">
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); text-transform: uppercase; margin-top: 8px;"><span>Understated</span><span>Balanced</span><span>Stand Out</span></div>
+          </div>
+      </div>
+    </div>
+
+    <div id="tailorBlock" class="hidden">
+      <select id="fitPreference">
+        <option value="">Select Target Fit Preference</option>
+        <option value="Slim / Razor-Sharp">Slim / Razor-Sharp</option>
+        <option value="Tailored / Modern">Tailored / Modern</option>
+        <option value="Classic / Traditional">Classic / Traditional</option>
+        <option value="Relaxed / Draped">Relaxed / Draped</option>
+      </select>
+    </div>
+
+    <textarea id="notes" placeholder="Additional notes or constraints..."></textarea>
+    <button id="evaluateBtn">Generate Briefing</button>
+    <div id="result" class="result hidden"></div>
+  </div>
+
+  <div id="vaultView" class="hidden">
+    <button onclick="openValetDashboard()" id="valetBtn" class="upload-btn" style="margin-top: 0; margin-bottom: 20px; background: rgba(30, 58, 138, 0.2); border-color: var(--accent-blue); color: white;">⚑ The Valet (Loading...)</button>
+    <div id="vaultDashboard" class="card" style="margin-top: 0; margin-bottom: 30px; display: none;"><div class="label" style="text-align: center; margin-bottom: 15px;">Wardrobe Analytics (Style DNA)</div><div class="breakdown-grid" id="analyticsGrid"></div></div>
+    <button class="upload-btn" id="ghostSimTrigger" style="margin-top: 0; margin-bottom: 30px; border-style: dashed; border-color: #9333EA; color: #9333EA;">✦ Curate Anchor Piece</button>
+    
+    <div class="card" style="margin-top: 0; margin-bottom: 30px;">
+      <div class="label">Add Garment to Inventory</div>
+      <input type="file" id="garmentInput" accept="image/*" class="hidden" />
+      <button class="upload-btn" id="garmentUploadTrigger" style="margin-top: 0;">Upload Photo</button>
+      <input type="file" id="careTagInput" accept="image/*" class="hidden" />
+      <button class="upload-btn" id="careTagUploadTrigger" style="margin-top: 10px; font-size: 9px; border-style: dashed;">[Optional] Scan Care Tag</button>
+      <div id="careTagStatus" style="font-size: 9px; color: #10B981; text-align: center; margin-top: 8px;" class="hidden">Care Instructions Captured ✓</div>
+      <div id="garmentFrame" class="image-frame hidden"><img id="garmentPreview" alt="Garment Upload Preview" /></div>
+      <div id="garmentDetails" class="hidden">
+        <select id="garmentCategory">
+          <option value="">Select Category</option>
+          <option value="Top">Top (Shirt, Sweater)</option>
+          <option value="Bottom">Bottom (Pants, Shorts)</option>
+          <option value="Outerwear">Outerwear (Jacket, Coat)</option>
+          <option value="Footwear">Footwear</option>
+          <option value="Accessory">Accessory</option>
+        </select>
+        <input type="number" id="garmentPrice" placeholder="Purchase Price (e.g. 150)" />
+        <input type="text" id="garmentNotes" placeholder="Brief description (e.g. Navy Linen Blazer)" />
+        <button id="saveGarmentBtn">Save to Wardrobe</button>
+      </div>
+      <div id="garmentStatus" style="font-size: 11px; color: var(--accent-gold); text-align: center; margin-top: 10px;" class="hidden">Saving...</div>
+    </div>
+
+    <div class="label">Your Inventory <span style="font-size: 8px; color: var(--text-muted); text-transform: none;">(Double-tap item to log wear)</span></div>
+    <div id="vaultLoader" class="loader-container hidden"><div class="spinner"></div><div class="loading-text">Loading Inventory...</div></div>
+    <div id="vaultFeed" class="vault-grid"></div>
+  </div>
+
+  <div id="wardrobeView" class="hidden">
+    <div id="scoreAnalytics" class="card" style="display: flex; justify-content: space-around; margin-top: 0; margin-bottom: 20px;">
+        <div style="text-align: center;">
+            <div class="label" style="margin-bottom: 4px;">7-Day Avg. Score</div>
+            <div id="weeklyAvgScore" class="score-num" style="font-size: 32px;">--</div>
+        </div>
+        <div style="text-align: center;">
+            <div class="label" style="margin-bottom: 4px;">Lifetime Score</div>
+            <div id="lifetimeAvgScore" class="score-num" style="font-size: 32px;">--</div>
+        </div>
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+      <button class="upload-btn" id="acquisitionBoardBtn" style="margin-top: 0; border-color: #10B981; color: #10B981; font-size: 9px; flex: 1;">View Acquisition Board</button>
+      <button class="upload-btn" id="chronosBtn" style="margin-top: 0; border-color: #9333EA; color: #9333EA; font-size: 9px; flex: 1;">Chronos Aesthetic Heatmap</button>
+    </div>
+
+    <div id="historyLoader" class="loader-container hidden"><div class="spinner"></div><div class="loading-text">Retrieving Archives...</div></div>
+    <div id="historyFeed" class="history-grid"></div>
+  </div>
+
+</div>
+
+<div id="genericModal" class="modal-overlay">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeGenericModal()" aria-label="Close Modal">✕</button>
+    <div id="genericModalBody"></div>
+  </div>
+</div>
+
+<div id="ghostModal" class="modal-overlay">
+  <div class="modal-content">
+    <button class="modal-close" onclick="document.getElementById('ghostModal').classList.remove('active')" aria-label="Close Modal">✕</button>
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="font-family: 'Cinzel'; font-size: 24px; color: white;">Curate Anchor Piece</div>
+      <div style="font-size: 10px; color: #9333EA; letter-spacing: 2px; text-transform: uppercase; margin-top: 5px;">Evaluate & Integrate</div>
+    </div>
+    <div class="card" style="margin-top: 0; margin-bottom: 15px;">
+      <div class="label" style="text-transform: none;">Upload a garment to see how it pairs with your wardrobe & what else you need to buy.</div>
+      <input type="file" id="ghostInput" accept="image/*" class="hidden" />
+      <button class="upload-btn" onclick="document.getElementById('ghostInput').click()" style="margin-top: 15px; border-color: #9333EA; color: #9333EA;">Select Image</button>
+      <div id="ghostFrame" class="image-frame hidden"><img id="ghostPreview" alt="Ghost Anchor Preview" /></div>
+    </div>
+    <input type="text" id="ghostDesc" placeholder="Description (e.g., Loro Piana Navy Cashmere Topcoat)" style="margin-top: 0; margin-bottom: 15px;" />
+    <button class="upload-btn" id="runGhostBtn" style="background: #9333EA; color: white; border-color: #9333EA;">Run Stylist Analysis</button>
+    <div id="ghostResult" style="margin-top: 20px;"></div>
+  </div>
+</div>
+
+<script type="module" src="/main.js"></script>
+
+</body>
+</html>
