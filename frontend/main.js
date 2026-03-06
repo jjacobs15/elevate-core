@@ -17,7 +17,7 @@ const supabaseClient = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KE
 });
 
 try {
-  // UX UPDATE: Default to Evaluate (Consult Stylist) instead of Morning Briefing
+  // Global states
   let globalSession = null;
   let currentMode = 'evaluate'; 
   let lastAnalysisData = null;
@@ -25,8 +25,11 @@ try {
   let cachedVaultInventory = []; 
   let parsedCareTagData = null; 
 
+  // PRODUCTION UPDATE: Added strict error rejections to prevent silent hangs on corrupt/HEIC images
   function compressImage(file, maxSize = 1200) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+          if (!file) return reject(new Error("No file provided."));
+          
           const reader = new FileReader();
           reader.onload = (event) => {
               const img = new Image();
@@ -50,15 +53,18 @@ try {
                   
                   resolve(canvas.toDataURL('image/jpeg', 0.8));
               };
+              
+              img.onerror = () => reject(new Error("Invalid image format. Please upload a standard JPG or PNG file."));
               img.src = event.target.result;
           };
+          
+          reader.onerror = () => reject(new Error("Failed to read the file from your device."));
           reader.readAsDataURL(file);
       });
   }
   
-  // FIXED: Removed the aggressive 4-second timeout to prevent connection drops
+  // PRODUCTION UPDATE: Fast, lock-free fetch wrapper
   async function secureFetch(endpoint, options = {}) {
-      // Bypass getSession() entirely and use the cached token
       if (!globalSession || !globalSession.access_token) {
           throw new Error("Authentication required. Please sign out and log back in.");
       }
@@ -112,7 +118,7 @@ try {
   }
 
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      globalSession = session; // <-- ADD THIS LINE
+      globalSession = session;
       const authOverlay = document.getElementById('authOverlay');
       if (session) {
           authOverlay.classList.add('hidden');
@@ -195,10 +201,8 @@ try {
       document.getElementById('evalDate').value = todayStr;
       document.getElementById('targetDate').value = todayStr;
       
-      // UX UPDATE: Force the UI to initialize in the Evaluate tab on load
       const evalBtn = document.getElementById('btn-evaluate');
       if (evalBtn) evalBtn.click();
-      
     } catch (e) { console.warn("Initialization logic err."); }
   });
 
@@ -280,7 +284,7 @@ try {
     garmentStatus.innerText = "Optimizing Image...";
 
     try {
-        const base64Image = await compressImage(currentGarmentFile);
+        let base64Image = await compressImage(currentGarmentFile);
         
         garmentStatus.innerText = "Extracting Fabric Attributes (AI Vision)...";
         const tagRes = await secureFetch('/api/wardrobe/auto-tag', {
@@ -313,8 +317,7 @@ try {
         const fetchRes = await fetch(transparentImageUri);
         const blob = await fetchRes.blob();
         
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const fileName = `${session.user.id}/vault_clean_${Math.random().toString(36).substring(2)}.png`;
+        const fileName = `${globalSession.user.id}/vault_clean_${Math.random().toString(36).substring(2)}.png`;
         
         const { data: uploadData, error: uploadError } = await supabaseClient.storage
           .from('wardrobe_images')
@@ -350,12 +353,12 @@ try {
           currentGarmentFile = null;
           parsedCareTagData = null;
           garmentInput.value = ""; 
-          saveGarmentBtn.disabled = false; 
           fetchVaultInventory();
         }, 1500);
 
     } catch (err) {
       garmentStatus.innerText = "Failed to process: " + err.message;
+    } finally {
       saveGarmentBtn.disabled = false; 
     }
   });
@@ -522,7 +525,11 @@ try {
     btn.disabled = true;
 
     try {
-        const base64Image = await compressImage(file);
+        let base64Image = await compressImage(file);
+        
+        // PRODUCTION UPDATE: Strip data URI prefix to save bandwidth
+        if (base64Image.includes(',')) base64Image = base64Image.split(',')[1];
+
         const res = await secureFetch('/api/designer/ghost-simulation', {
           method: 'POST',
           body: {
@@ -564,9 +571,9 @@ try {
         document.getElementById('ghostResult').innerHTML = resultHtml;
         btn.innerText = "Simulation Complete";
     } catch (err) {
-      alert("Failed to run Anchor Analysis.");
-      btn.disabled = false;
+      alert("Failed to run Anchor Analysis: " + err.message);
       btn.innerText = "Run Stylist Analysis";
+      btn.disabled = false;
     }
   });
 
@@ -615,7 +622,8 @@ try {
   };
 
   window.apiIncrementWear = async function(id, isQuickLog = false) {
-    if(!isQuickLog) document.getElementById(`btn-inc-${id}`).innerText = "Logging...";
+    const btn = document.getElementById(`btn-inc-${id}`);
+    if(!isQuickLog && btn) btn.innerText = "Logging...";
     try {
       const res = await secureFetch('/api/ledger/increment', {
         method: 'POST',
@@ -628,7 +636,11 @@ try {
           setTimeout(() => openVaultItemDetail(id), 100); 
         }
       }
-    } catch(e) { console.error(e); alert("Failed to log wear."); }
+    } catch(e) { 
+        console.error(e); 
+        alert("Failed to log wear."); 
+        if (!isQuickLog && btn) btn.innerText = "+1 Mark as Worn"; 
+    }
   };
 
   window.triggerNightstandLog = async function(buttonEl, ...itemIds) {
@@ -645,11 +657,17 @@ try {
             buttonEl.style.color = "#10B981";
             fetchVaultInventory(true);
         }
-      } catch(e) { console.error(e); alert("Failed to log nightstand outfit."); buttonEl.disabled = false;}
+      } catch(e) { 
+          console.error(e); 
+          alert("Failed to log nightstand outfit."); 
+          buttonEl.disabled = false;
+          buttonEl.innerText = "Log This Wear";
+      }
   };
 
   window.apiResetItem = async function(id) {
-    document.getElementById(`btn-reset-${id}`).innerText = "Resetting...";
+    const btn = document.getElementById(`btn-reset-${id}`);
+    if (btn) btn.innerText = "Resetting...";
     try {
       const res = await secureFetch('/api/ledger/reset', {
         method: 'POST',
@@ -660,7 +678,11 @@ try {
         closeGenericModal();
         setTimeout(() => openVaultItemDetail(id), 100);
       }
-    } catch(e) { console.error(e); alert("Failed to reset item."); }
+    } catch(e) { 
+        console.error(e); 
+        alert("Failed to reset item."); 
+        if (btn) btn.innerText = "Mark as Cleaned";
+    }
   };
 
   window.apiBulkReset = async function() {
@@ -680,7 +702,11 @@ try {
         await fetchVaultInventory();
         closeGenericModal();
       }
-    } catch(e) { console.error(e); alert("Failed to process laundry list."); }
+    } catch(e) { 
+        console.error(e); 
+        alert("Failed to process laundry list."); 
+        if (btn) btn.innerText = "Mark All Items as Cleaned";
+    }
   };
 
   window.closeGenericModal = function() { document.getElementById('genericModal').classList.remove('active'); };
@@ -1089,11 +1115,16 @@ try {
 
     resultBox.innerHTML = `<div class="loader-container"><div class="spinner"></div><div class="loading-text" id="statusText">${loadingMessage}</div></div>`;
     
-    if (activeApiMode === 'wardrobe_builder' || activeApiMode === 'travel_curator' || activeApiMode === 'office_curation' || activeApiMode === 'work_trip_curator' || activeApiMode === 'morning_briefing') {
-        await sendStreamingRequest(null, activeApiMode);
-    } else {
-        const compressedBase64 = await compressImage(imageInput.files[0]);
-        await sendStreamingRequest(compressedBase64, activeApiMode);
+    try {
+        if (activeApiMode === 'wardrobe_builder' || activeApiMode === 'travel_curator' || activeApiMode === 'office_curation' || activeApiMode === 'work_trip_curator' || activeApiMode === 'morning_briefing') {
+            await sendStreamingRequest(null, activeApiMode);
+        } else {
+            const compressedBase64 = await compressImage(imageInput.files[0]);
+            await sendStreamingRequest(compressedBase64, activeApiMode);
+        }
+    } catch (err) {
+        resultBox.innerHTML = `<div style="color:#ef4444; text-align:center; padding: 20px;"><strong>Error</strong><br>${err.message}</div>`;
+        evaluateBtn.disabled = false;
     }
   });
 
@@ -1149,13 +1180,19 @@ try {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 180000); 
+
+    // PRODUCTION UPDATE: Strip base64 prefix to save bandwidth
+    let safeImage = base64;
+    if (safeImage && safeImage.includes(',')) {
+        safeImage = safeImage.split(',')[1];
+    }
     
     try {
         const response = await secureFetch('/api/chat', { 
             method: 'POST',
             signal: controller.signal,
             body: {
-                image: base64, 
+                image: safeImage, 
                 mode: activeApiMode,
                 occasion: selectedOccasion || "General",
                 notes: finalNotes, 
@@ -1196,7 +1233,9 @@ try {
     } catch (error) {
         let msg = error.name === 'AbortError' ? "Generation timed out. The server dropped the connection." : error.message;
         resultBox.innerHTML = `<div style="color:#ef4444; text-align:center; padding: 20px;"><strong>Analysis Failed</strong><br>${msg}</div>`;
-    } finally { evaluateBtn.disabled = false; }
+    } finally { 
+        evaluateBtn.disabled = false; 
+    }
   }
 
   function getTierColor(score) {
