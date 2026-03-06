@@ -55,20 +55,12 @@ try {
   }
   
   async function secureFetch(endpoint, options = {}) {
-      const sessionPromise = supabaseClient.auth.getSession();
-      const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Browser Tracking Prevention is blocking session access. Please disable shields/tracking prevention for this site.")), 4000)
-      );
-      
-      let sessionData;
-      try {
-          sessionData = await Promise.race([sessionPromise, timeoutPromise]);
-      } catch (err) {
-          throw err;
-      }
+      // Ask Supabase for the session without an aggressive 4-second timeout
+      const { data: { session }, error } = await supabaseClient.auth.getSession();
 
-      const { data: { session }, error } = sessionData;
-      if (error || !session) throw new Error("Authentication required. Please log in again.");
+      if (error || !session) {
+          throw new Error("Authentication required. Please sign out and log back in.");
+      }
 
       const headers = {
           'Authorization': `Bearer ${session.access_token}`,
@@ -80,7 +72,14 @@ try {
           if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
       }
 
+      // Route the request to your Railway backend
       const response = await fetch(`${CONFIG.BACKEND_URL}${endpoint}`, { ...options, headers });
+      
+      if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Backend Error: ${response.status}`);
+      }
+      
       return response;
   }
 
