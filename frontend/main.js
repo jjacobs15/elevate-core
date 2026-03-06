@@ -25,7 +25,6 @@ try {
   let cachedVaultInventory = []; 
   let parsedCareTagData = null; 
 
-  // PRODUCTION UPDATE: Added Universal Base64 Stripping & strict error rejections
   function compressImage(file, maxSize = 1200) {
       return new Promise((resolve, reject) => {
           if (!file) return reject(new Error("No file provided."));
@@ -52,7 +51,6 @@ try {
                   ctx.drawImage(img, 0, 0, width, height);
                   
                   // UNIVERSAL FIX: Strip the "data:image/jpeg;base64," prefix right at the source
-                  // This guarantees ALL backend routes receive pure, crash-proof base64 data
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                   const rawBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
                   
@@ -68,7 +66,6 @@ try {
       });
   }
   
-  // PRODUCTION UPDATE: Fast, lock-free fetch wrapper
   async function secureFetch(endpoint, options = {}) {
       if (!globalSession || !globalSession.access_token) {
           throw new Error("Authentication required. Please sign out and log back in.");
@@ -160,7 +157,6 @@ try {
 
   document.getElementById('logoutBtn').addEventListener('click', async () => await supabaseClient.auth.signOut());
 
-  // Logic Constants
   const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Outerwear": 5, "Bottom": 10, "Top": 2, "Accessory": 5, "Footwear": 10, "Default": 3 };
   const occasionMap = {
     "Activity / Outdoor": ["Beach", "Country Club", "Game", "Golf Scramble", "Hiking", "PickleBall", "Yacht / Sailing"],
@@ -173,7 +169,6 @@ try {
     "Other": ["Other"]
   };
 
-  // DOM Elements
   const imageInput = document.getElementById('imageInput');
   const uploadTrigger = document.getElementById('uploadTrigger');
   const evaluateBtn = document.getElementById('evaluateBtn');
@@ -368,84 +363,95 @@ try {
     }
   });
 
+  // PRODUCTION FIX: Bypass Supabase SDK freeze using native unblockable fetch
   async function fetchVaultInventory(backgroundOnly = false) {
     if (!backgroundOnly) {
         vaultFeed.innerHTML = '';
         vaultLoader.classList.remove('hidden');
     }
     
-    const { data, error } = await supabaseClient.from('my_closet').select('*').order('created_at', { ascending: false });
-    if (!backgroundOnly) vaultLoader.classList.add('hidden');
+    try {
+        const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/my_closet?select=*&order=created_at.desc`, {
+            headers: {
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${globalSession?.access_token}`
+            }
+        });
+        
+        if (!res.ok) throw new Error("Database connection failed");
+        const data = await res.json();
+        
+        if (!backgroundOnly) vaultLoader.classList.add('hidden');
+        cachedVaultInventory = data;
 
-    if (error) {
-        if (!backgroundOnly) vaultFeed.innerHTML = `<p style="color:#ef4444; grid-column:span 2;">Failed to load inventory: ${error.message}</p>`;
-        return;
+        const dirtyItems = cachedVaultInventory.filter(i => {
+          const limit = i.wear_threshold || WEAR_THRESHOLDS[i.category] || WEAR_THRESHOLDS["Default"];
+          return i.status === 'NEEDS_CARE' || (i.wear_count || 0) >= limit;
+        });
+        
+        const valetBtn = document.getElementById('valetBtn');
+        if (dirtyItems.length > 0) {
+            valetBtn.innerHTML = `⚑ The Valet <span style="color:#ef4444; font-weight:bold;">(${dirtyItems.length} Items Need Care)</span>`;
+            valetBtn.style.borderColor = "#ef4444";
+        } else {
+            valetBtn.innerHTML = `⚑ The Valet (All Items Clean)`;
+            valetBtn.style.borderColor = "var(--accent-blue)";
+        }
+
+        if (backgroundOnly) return; 
+
+        if (!data || data.length === 0) return vaultFeed.innerHTML = `<p style="text-align:center; color:var(--text-muted); font-size:12px; grid-column:span 2;">Your Wardrobe is currently empty. Start uploading garments!</p>`;
+
+        const counts = { Top: 0, Bottom: 0, Outerwear: 0, Footwear: 0, Accessory: 0 };
+        let total = data.length;
+        data.forEach(item => { if(counts[item.category] !== undefined) counts[item.category]++; });
+
+        const createStatBar = (label, count, total) => {
+            const p = total > 0 ? (count / total) * 100 : 0;
+            return `<div class="breakdown-item"><div class="breakdown-header"><span>${label}</span><span class="breakdown-score">${count}</span></div><div class="bar"><div class="bar-fill" style="width:${p}%"></div></div></div>`;
+        };
+
+        document.getElementById('analyticsGrid').innerHTML = 
+            createStatBar("Tops", counts.Top, total) + 
+            createStatBar("Bottoms", counts.Bottom, total) + 
+            createStatBar("Outerwear", counts.Outerwear, total) + 
+            createStatBar("Footwear", counts.Footwear, total);
+        document.getElementById('vaultDashboard').style.display = 'block';
+
+        data.forEach(item => {
+          const wearCount = item.wear_count || 0;
+          const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
+          let statusClass = 'status-clean';
+          let bannerHtml = '';
+
+          if (item.status === 'NEEDS_CARE' || wearCount >= limit) {
+              statusClass = 'status-care';
+              bannerHtml = `<div style="position:absolute; bottom:40px; left:0; width:100%; background:rgba(239, 68, 68, 0.9); color:white; font-size:9px; font-weight:bold; text-align:center; padding:4px 0; letter-spacing:1px; z-index:5;">NEEDS CARE</div>`;
+          }
+          else if (wearCount >= limit - 1 && limit > 1) statusClass = 'status-worn';
+
+          const div = document.createElement('div');
+          div.className = 'vault-item';
+          div.id = `vault-${item.id}`;
+          div.onclick = (e) => { if(e.target.tagName !== 'BUTTON') openVaultItemDetail(item.id); };
+          div.ondblclick = (e) => { e.preventDefault(); e.stopPropagation(); logWearQuick(item.id); };
+          
+          div.innerHTML = `
+            <div class="status-dot ${statusClass}" title="Wear Count: ${wearCount}/${limit}"></div>
+            <button class="delete-btn" onclick="event.stopPropagation(); deleteVaultItem('${item.id}')" style="position:absolute; top:15px; right:15px; background:rgba(0,0,0,0.5); border-radius:50%; width:20px; height:20px; line-height:18px; text-align:center; z-index: 10;">✕</button>
+            <img src="${item.image_url}" loading="lazy" style="pointer-events: none;" alt="${item.category}">
+            ${bannerHtml}
+            <div class="vault-meta">${item.category}</div>
+            <div class="vault-notes">${item.notes || 'No description'}</div>
+          `;
+          vaultFeed.appendChild(div);
+        });
+    } catch (error) {
+        if (!backgroundOnly) {
+            vaultLoader.classList.add('hidden');
+            vaultFeed.innerHTML = `<p style="color:#ef4444; grid-column:span 2;">Failed to load inventory: ${error.message}</p>`;
+        }
     }
-
-    cachedVaultInventory = data;
-
-    const dirtyItems = cachedVaultInventory.filter(i => {
-      const limit = i.wear_threshold || WEAR_THRESHOLDS[i.category] || WEAR_THRESHOLDS["Default"];
-      return i.status === 'NEEDS_CARE' || (i.wear_count || 0) >= limit;
-    });
-    
-    const valetBtn = document.getElementById('valetBtn');
-    if (dirtyItems.length > 0) {
-        valetBtn.innerHTML = `⚑ The Valet <span style="color:#ef4444; font-weight:bold;">(${dirtyItems.length} Items Need Care)</span>`;
-        valetBtn.style.borderColor = "#ef4444";
-    } else {
-        valetBtn.innerHTML = `⚑ The Valet (All Items Clean)`;
-        valetBtn.style.borderColor = "var(--accent-blue)";
-    }
-
-    if (backgroundOnly) return; 
-
-    if (!data || data.length === 0) return vaultFeed.innerHTML = `<p style="text-align:center; color:var(--text-muted); font-size:12px; grid-column:span 2;">Your Wardrobe is currently empty. Start uploading garments!</p>`;
-
-    const counts = { Top: 0, Bottom: 0, Outerwear: 0, Footwear: 0, Accessory: 0 };
-    let total = data.length;
-    data.forEach(item => { if(counts[item.category] !== undefined) counts[item.category]++; });
-
-    const createStatBar = (label, count, total) => {
-        const p = total > 0 ? (count / total) * 100 : 0;
-        return `<div class="breakdown-item"><div class="breakdown-header"><span>${label}</span><span class="breakdown-score">${count}</span></div><div class="bar"><div class="bar-fill" style="width:${p}%"></div></div></div>`;
-    };
-
-    document.getElementById('analyticsGrid').innerHTML = 
-        createStatBar("Tops", counts.Top, total) + 
-        createStatBar("Bottoms", counts.Bottom, total) + 
-        createStatBar("Outerwear", counts.Outerwear, total) + 
-        createStatBar("Footwear", counts.Footwear, total);
-    document.getElementById('vaultDashboard').style.display = 'block';
-
-    data.forEach(item => {
-      const wearCount = item.wear_count || 0;
-      const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
-      let statusClass = 'status-clean';
-      let bannerHtml = '';
-
-      if (item.status === 'NEEDS_CARE' || wearCount >= limit) {
-          statusClass = 'status-care';
-          bannerHtml = `<div style="position:absolute; bottom:40px; left:0; width:100%; background:rgba(239, 68, 68, 0.9); color:white; font-size:9px; font-weight:bold; text-align:center; padding:4px 0; letter-spacing:1px; z-index:5;">NEEDS CARE</div>`;
-      }
-      else if (wearCount >= limit - 1 && limit > 1) statusClass = 'status-worn';
-
-      const div = document.createElement('div');
-      div.className = 'vault-item';
-      div.id = `vault-${item.id}`;
-      div.onclick = (e) => { if(e.target.tagName !== 'BUTTON') openVaultItemDetail(item.id); };
-      div.ondblclick = (e) => { e.preventDefault(); e.stopPropagation(); logWearQuick(item.id); };
-      
-      div.innerHTML = `
-        <div class="status-dot ${statusClass}" title="Wear Count: ${wearCount}/${limit}"></div>
-        <button class="delete-btn" onclick="event.stopPropagation(); deleteVaultItem('${item.id}')" style="position:absolute; top:15px; right:15px; background:rgba(0,0,0,0.5); border-radius:50%; width:20px; height:20px; line-height:18px; text-align:center; z-index: 10;">✕</button>
-        <img src="${item.image_url}" loading="lazy" style="pointer-events: none;" alt="${item.category}">
-        ${bannerHtml}
-        <div class="vault-meta">${item.category}</div>
-        <div class="vault-notes">${item.notes || 'No description'}</div>
-      `;
-      vaultFeed.appendChild(div);
-    });
   }
 
   window.openVaultItemDetail = function(id) {
@@ -831,81 +837,95 @@ try {
     }
   });
 
+  // PRODUCTION FIX: Bypass Supabase JS library freeze by using native REST fetch
   async function fetchWardrobeHistory() {
     historyFeed.innerHTML = '';
     historyLoader.classList.remove('hidden');
     
-    const { data, error } = await supabaseClient.from('wardrobe_analyses').select('*').order('created_at', { ascending: false });
-    historyLoader.classList.add('hidden');
+    try {
+        const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/wardrobe_analyses?select=*&order=created_at.desc`, {
+            headers: {
+                'apikey': CONFIG.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${globalSession?.access_token}`
+            }
+        });
+        
+        if (!res.ok) throw new Error("Database connection failed");
+        const data = await res.json();
+        
+        historyLoader.classList.add('hidden');
 
-    if (error) return historyFeed.innerHTML = `<p style="color:#ef4444;">Failed to load dossiers: ${error.message}</p>`;
-    if (!data || data.length === 0) return historyFeed.innerHTML = `<p style="text-align:center; color:var(--text-muted); font-size:12px;">Your archives are currently empty.</p>`;
+        if (!data || data.length === 0) return historyFeed.innerHTML = `<p style="text-align:center; color:var(--text-muted); font-size:12px;">Your archives are currently empty.</p>`;
 
-    cachedDossierHistory = data; 
-    
-    const now = new Date();
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(now.getDate() - 7);
+        cachedDossierHistory = data; 
+        
+        const now = new Date();
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(now.getDate() - 7);
 
-    let lifetimeSum = 0, lifetimeCount = 0;
-    let weeklySum = 0, weeklyCount = 0;
+        let lifetimeSum = 0, lifetimeCount = 0;
+        let weeklySum = 0, weeklyCount = 0;
 
-    data.forEach(item => {
-      const score = item.score;
-      if (typeof score === 'number' && score > 0) {
-        lifetimeSum += score;
-        lifetimeCount++;
-        const itemDate = new Date(item.created_at);
-        if (itemDate >= oneWeekAgo) {
-            weeklySum += score;
-            weeklyCount++;
-        }
-      }
-    });
+        data.forEach(item => {
+          const score = item.score;
+          if (typeof score === 'number' && score > 0) {
+            lifetimeSum += score;
+            lifetimeCount++;
+            const itemDate = new Date(item.created_at);
+            if (itemDate >= oneWeekAgo) {
+                weeklySum += score;
+                weeklyCount++;
+            }
+          }
+        });
 
-    const lifetimeAvg = lifetimeCount > 0 ? Math.round(lifetimeSum / lifetimeCount) : '--';
-    const weeklyAvg = weeklyCount > 0 ? Math.round(weeklySum / weeklyCount) : '--';
+        const lifetimeAvg = lifetimeCount > 0 ? Math.round(lifetimeSum / lifetimeCount) : '--';
+        const weeklyAvg = weeklyCount > 0 ? Math.round(weeklySum / weeklyCount) : '--';
 
-    document.getElementById('lifetimeAvgScore').innerText = lifetimeAvg;
-    document.getElementById('lifetimeAvgScore').style.color = getTierColor(lifetimeAvg === '--' ? 0 : lifetimeAvg);
-    document.getElementById('weeklyAvgScore').innerText = weeklyAvg;
-    document.getElementById('weeklyAvgScore').style.color = getTierColor(weeklyAvg === '--' ? 0 : weeklyAvg);
+        document.getElementById('lifetimeAvgScore').innerText = lifetimeAvg;
+        document.getElementById('lifetimeAvgScore').style.color = getTierColor(lifetimeAvg === '--' ? 0 : lifetimeAvg);
+        document.getElementById('weeklyAvgScore').innerText = weeklyAvg;
+        document.getElementById('weeklyAvgScore').style.color = getTierColor(weeklyAvg === '--' ? 0 : weeklyAvg);
 
-    data.forEach(item => {
-      if(item.mode === 'acquisition_board') return;
+        data.forEach(item => {
+          if(item.mode === 'acquisition_board') return;
 
-      const dateStr = new Date(item.created_at).toLocaleDateString();
-      const score = item.score || 'N/A';
-      const tierColor = getTierColor(item.score || 0);
-      
-      const div = document.createElement('div');
-      div.className = 'history-item';
-      div.id = `dossier-${item.id}`;
-      div.onclick = () => openDossierModal(item.id);
-      
-      let displayMode = item.mode.replace('_', ' ');
-      if (item.mode === 'wardrobe_builder') displayMode = "1-Day Look";
-      if (item.mode === 'work_trip_curator') displayMode = "Work Trip";
+          const dateStr = new Date(item.created_at).toLocaleDateString();
+          const score = item.score || 'N/A';
+          const tierColor = getTierColor(item.score || 0);
+          
+          const div = document.createElement('div');
+          div.className = 'history-item';
+          div.id = `dossier-${item.id}`;
+          div.onclick = () => openDossierModal(item.id);
+          
+          let displayMode = item.mode.replace('_', ' ');
+          if (item.mode === 'wardrobe_builder') displayMode = "1-Day Look";
+          if (item.mode === 'work_trip_curator') displayMode = "Work Trip";
 
-      div.innerHTML = `
-        <img src="${item.image_url}" alt="Wardrobe analysis image" loading="lazy">
-        <div class="history-content">
-          <div>
-            <div class="history-meta">
-              <span>${dateStr} &bull; <span style="text-transform:capitalize;">${displayMode}</span></span>
-              <button class="delete-btn" onclick="event.stopPropagation(); deleteDossier('${item.id}')" title="Delete Dossier">✕</button>
+          div.innerHTML = `
+            <img src="${item.image_url}" alt="Wardrobe analysis image" loading="lazy">
+            <div class="history-content">
+              <div>
+                <div class="history-meta">
+                  <span>${dateStr} &bull; <span style="text-transform:capitalize;">${displayMode}</span></span>
+                  <button class="delete-btn" onclick="event.stopPropagation(); deleteDossier('${item.id}')" title="Delete Dossier">✕</button>
+                </div>
+                <div class="label" style="font-size:8px;">Blueprint Verdict</div>
+                <div class="history-verdict">${item.verdict || 'Analysis interrupted or pending.'}</div>
+              </div>
+              <div class="history-score-block">
+                <span style="font-size: 10px; font-weight: bold; letter-spacing: 1px; color: ${tierColor}; text-transform: uppercase;">${item.tier || 'Pending'}</span>
+                <div class="history-score" style="color: ${tierColor};">${score}</div>
+              </div>
             </div>
-            <div class="label" style="font-size:8px;">Blueprint Verdict</div>
-            <div class="history-verdict">${item.verdict || 'Analysis interrupted or pending.'}</div>
-          </div>
-          <div class="history-score-block">
-            <span style="font-size: 10px; font-weight: bold; letter-spacing: 1px; color: ${tierColor}; text-transform: uppercase;">${item.tier || 'Pending'}</span>
-            <div class="history-score" style="color: ${tierColor};">${score}</div>
-          </div>
-        </div>
-      `;
-      historyFeed.appendChild(div);
-    });
+          `;
+          historyFeed.appendChild(div);
+        });
+    } catch (error) {
+        historyLoader.classList.add('hidden');
+        historyFeed.innerHTML = `<p style="color:#ef4444;">Failed to load dossiers: ${error.message}</p>`;
+    }
   }
 
   window.openDossierModal = function(id) {
@@ -1183,12 +1203,17 @@ try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 180000); 
 
+    let safeImage = base64;
+    if (safeImage && safeImage.includes(',')) {
+        safeImage = safeImage.split(',')[1];
+    }
+    
     try {
         const response = await secureFetch('/api/chat', { 
             method: 'POST',
             signal: controller.signal,
             body: {
-                image: base64, // Universally pure base64
+                image: safeImage, 
                 mode: activeApiMode,
                 occasion: selectedOccasion || "General",
                 notes: finalNotes, 
