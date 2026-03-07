@@ -153,13 +153,23 @@ try {
       if (error) { document.getElementById('authErrorMsg').innerText = error.message; document.getElementById('authErrorMsg').style.display = 'block'; }
   });
 
-  // UX UPDATE: Force UI reload and data flush on Sign Out
+  // UX UPDATE: Force UI reload and data flush on Sign Out with Killswitch
   document.getElementById('logoutBtn').addEventListener('click', async () => {
       const btn = document.getElementById('logoutBtn');
       btn.innerText = "Signing Out...";
       btn.disabled = true;
       
-      await supabaseClient.auth.signOut();
+      try {
+          // Give Supabase exactly 1.5 seconds to sign out cleanly on the backend
+          await Promise.race([
+              supabaseClient.auth.signOut(),
+              new Promise(resolve => setTimeout(resolve, 1500))
+          ]);
+      } catch (err) {
+          console.warn("Sign out network drop ignored.");
+      }
+      
+      // THE NUCLEAR OPTION: Wipe local memory and force reload NO MATTER WHAT
       localStorage.clear(); 
       sessionStorage.clear();
       window.location.reload(); 
@@ -1070,9 +1080,9 @@ try {
     radio.addEventListener('change', (e) => {
       currentMode = e.target.value;
       // Remove 'active' class from all label containers
-      tailorRadios.forEach(r => r.closest('label').classList.remove('active'));
+      tailorRadios.forEach(r => r.closest('.sub-btn').classList.remove('active'));
       // Add 'active' class to the selected label container
-      e.target.closest('label').classList.add('active');
+      e.target.closest('.sub-btn').classList.add('active');
       updateTailorUI();
     });
   });
