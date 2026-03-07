@@ -428,10 +428,10 @@ try {
         
         const valetBtn = document.getElementById('valetBtn');
         if (dirtyItems.length > 0) {
-            valetBtn.innerHTML = `⚑ The Valet <span style="color:#ef4444; font-weight:bold;">(${dirtyItems.length} Items Need Care)</span>`;
+            valetBtn.innerHTML = `⚑ The Wardrobe Concierge <span style="color:#ef4444; font-weight:bold;">(${dirtyItems.length} Items Need Care)</span>`;
             valetBtn.style.borderColor = "#ef4444";
         } else {
-            valetBtn.innerHTML = `⚑ The Valet (All Items Clean)`;
+            valetBtn.innerHTML = `⚑ The Wardrobe Concierge (All Items Clean)`;
             valetBtn.style.borderColor = "var(--accent-blue)";
         }
 
@@ -631,7 +631,7 @@ try {
 
     let html = `
       <div style="text-align: center; margin-bottom: 24px;">
-        <div style="font-family: 'Cinzel'; font-size: 24px; color: white;">The Valet</div>
+        <div style="font-family: 'Cinzel'; font-size: 24px; color: white;">The Wardrobe Concierge</div>
         <div style="font-size: 10px; color: var(--accent-gold); letter-spacing: 2px; text-transform: uppercase; margin-top: 5px;">Laundry & Dry Cleaning Dashboard</div>
       </div>
     `;
@@ -857,7 +857,7 @@ try {
         const trajColor = chronos.trajectory === 'Improving' ? '#10B981' : (chronos.trajectory === 'Stagnant' ? '#EAB308' : '#ef4444');
 
         let html = `<div style="text-align: center; margin-bottom: 24px;">
-            <div style="font-family: 'Cinzel'; font-size: 24px; color: white;">Chronos Heatmap</div>
+            <div style="font-family: 'Cinzel'; font-size: 24px; color: white;">Aesthetic Trajectory</div>
             <div style="font-size: 10px; color: #9333EA; letter-spacing: 2px; text-transform: uppercase; margin-top: 5px;">Aesthetic Evolution</div>
         </div>
         <div class="card" style="text-align: center; border-color: ${trajColor};">
@@ -879,7 +879,7 @@ try {
     } catch(err) {
         alert("Failed to map Aesthetic Evolution.");
     } finally {
-        btn.innerText = "Chronos Aesthetic Heatmap";
+        btn.innerText = "Aesthetic Trajectory";
         btn.disabled = false;
     }
   });
@@ -1019,7 +1019,7 @@ try {
     if (e.target.files[0]) {
       previewImg.src = URL.createObjectURL(e.target.files[0]);
       imageFrame.classList.remove('hidden');
-      uploadTrigger.innerText = "Revise Silhouette";
+      uploadTrigger.innerText = "Scan New Ensemble";
     }
   });
 
@@ -1054,13 +1054,15 @@ try {
     });
   });
 
-  // FIX: Properly clear active highlight state from all radio parent elements
+  // FIX: Make sure the radio selector targets the exact container div to remove highlights
   const tailorRadios = document.querySelectorAll('input[name="tailorMode"]');
   tailorRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
       currentMode = e.target.value;
-      tailorRadios.forEach(r => r.parentElement.classList.remove('active'));
-      e.target.parentElement.classList.add('active');
+      // Remove 'active' class from all label containers
+      tailorRadios.forEach(r => r.closest('label').classList.remove('active'));
+      // Add 'active' class to the selected label container
+      e.target.closest('label').classList.add('active');
       updateTailorUI();
     });
   });
@@ -1123,7 +1125,7 @@ try {
       document.getElementById('selectionBlock').classList.add('hidden');
       document.getElementById('buildDateBlock').classList.add('hidden');
       travelInputs.classList.add('hidden');
-      occasionBlock.classList.add('hidden'); // FIX: Explicity hide occasion block on fitting
+      occasionBlock.classList.add('hidden'); // FIX: Keep occasion hidden for fitting
       document.getElementById('tailorBlock').classList.remove('hidden');
       uploadTrigger.classList.remove('hidden');
       if (imageInput.files[0]) imageFrame.classList.remove('hidden');
@@ -1182,7 +1184,7 @@ try {
         if (pType === 'work_trip') activeApiMode = 'work_trip_curator';
     }
 
-    // FIX: Only require occasion dropdowns for modes that actually need it
+    // FIX: Ensure Occasion is strictly checked ONLY for the relevant modes
     if (activeApiMode === 'evaluate' || activeApiMode === 'wardrobe_builder') {
         const selectedOccasion = categoryEl.value === 'Other' ? customOccasionEl.value : occasionEl.value;
         if (!selectedOccasion) return alert("Please select a Target Occasion.");
