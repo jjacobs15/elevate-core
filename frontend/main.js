@@ -328,7 +328,6 @@ try {
         
         const fileName = `${globalSession.user.id}/vault_clean_${Math.random().toString(36).substring(2)}.png`;
         
-        // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock with Native Storage Fetch
         const uploadRes = await fetch(`${CONFIG.SUPABASE_URL}/storage/v1/object/wardrobe_images/${fileName}`, {
             method: 'POST',
             headers: {
@@ -346,7 +345,6 @@ try {
         
         const publicUrl = `${CONFIG.SUPABASE_URL}/storage/v1/object/public/wardrobe_images/${fileName}`;
 
-        // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock with Native Database Insert
         const dbRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/my_closet`, {
             method: 'POST',
             headers: {
@@ -760,7 +758,6 @@ try {
   window.closeGenericModal = function() { document.getElementById('genericModal').classList.remove('active'); };
   document.getElementById('genericModal').addEventListener('click', (e) => { if (e.target === document.getElementById('genericModal')) closeGenericModal(); });
 
-  // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock for deletions
   window.deleteVaultItem = async function(id) {
     if (!confirm("Remove this item from your Wardrobe?")) return;
     const el = document.getElementById(`vault-${id}`);
@@ -995,7 +992,6 @@ try {
       document.getElementById('genericModal').classList.add('active');
   };
 
-  // 🚀 PRODUCTION FIX: Bypass Supabase SDK Deadlock for deletions
   window.deleteDossier = async function(id) {
     if (!confirm("Delete this dossier?")) return;
     const itemCard = document.getElementById(`dossier-${id}`);
@@ -1058,11 +1054,12 @@ try {
     });
   });
 
+  // FIX: Properly clear active highlight state from all radio parent elements
   const tailorRadios = document.querySelectorAll('input[name="tailorMode"]');
   tailorRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
       currentMode = e.target.value;
-      document.querySelectorAll('.sub-btn').forEach(btn => btn.classList.remove('active'));
+      tailorRadios.forEach(r => r.parentElement.classList.remove('active'));
       e.target.parentElement.classList.add('active');
       updateTailorUI();
     });
@@ -1126,7 +1123,7 @@ try {
       document.getElementById('selectionBlock').classList.add('hidden');
       document.getElementById('buildDateBlock').classList.add('hidden');
       travelInputs.classList.add('hidden');
-      occasionBlock.classList.remove('hidden');
+      occasionBlock.classList.add('hidden'); // FIX: Explicity hide occasion block on fitting
       document.getElementById('tailorBlock').classList.remove('hidden');
       uploadTrigger.classList.remove('hidden');
       if (imageInput.files[0]) imageFrame.classList.remove('hidden');
@@ -1185,7 +1182,8 @@ try {
         if (pType === 'work_trip') activeApiMode = 'work_trip_curator';
     }
 
-    if (activeApiMode !== 'office_curation' && activeApiMode !== 'morning_briefing' && activeApiMode !== 'travel_curator' && activeApiMode !== 'work_trip_curator') {
+    // FIX: Only require occasion dropdowns for modes that actually need it
+    if (activeApiMode === 'evaluate' || activeApiMode === 'wardrobe_builder') {
         const selectedOccasion = categoryEl.value === 'Other' ? customOccasionEl.value : occasionEl.value;
         if (!selectedOccasion) return alert("Please select a Target Occasion.");
     }
