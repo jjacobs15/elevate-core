@@ -293,7 +293,7 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 });
 
 // ==========================================
-//   CHRONOS AESTHETIC HEATMAP (RESTORED!)
+//   CHRONOS AESTHETIC HEATMAP
 // ==========================================
 app.get("/api/analytics/chronos", async (req, res, next) => {
   try {
@@ -445,7 +445,44 @@ app.post("/api/chat", async (req, res, next) => {
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    const systemPrompt = `You are EleVate's Master Stylist.
+    // 🚀 PRODUCTION FIX: Dynamic Schema generation for Master Tailor (Fit) Mode
+    let dynamicJSONSchema = "";
+    
+    if (data.mode === 'fit') {
+      dynamicJSONSchema = `{
+        "score": <calculate a number between 0 and 100 representing overall fit/proportion>,
+        "tier": "<assign tier based on the classification scale above>",
+        "verdict": "<A brief summary of how the current silhouette and proportions look>",
+        "archetype": "<assign an archetype: e.g., The Executive, The Classicist>",
+        "fit_anatomy": {
+          "shoulders_and_chest": ["<Analyze shoulder seam placement, lapel bowing, or chest pulling>", "<Additional chest note>"],
+          "waist_and_torso": ["<Analyze waist suppression, shirt billowing, or jacket button tension>", "<Additional torso note>"],
+          "legs_and_hem": ["<Analyze trouser break (e.g. full/half/none), drape, and taper>", "<Additional leg note>"]
+        },
+        "alteration_blueprint": ["<Specific tailor instruction 1, e.g., 'Take in waist 1.5 inches'>", "<Specific tailor instruction 2>"],
+        "missing_pieces": ["<A piece that would improve this silhouette>"]
+      }`;
+    } else {
+      dynamicJSONSchema = `{
+        "score": <calculate a number between 0 and 100>,
+        "tier": "<assign tier based on the classification scale above>",
+        "verdict": "<A brief summary of the look.>",
+        "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
+        "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
+        "styling_notes": ["<Note 1>", "<Note 2>"],
+        "outfit_combinations": [
+          { "name": "<Look Name>", "reasoning": "<Why this works>", "item_urls": ["<url1>"] }
+        ],
+        "what_works": ["<Strength 1>"],
+        "recommendations": ["<Upgrade 1>"],
+        "missing_pieces": ["<Gap 1>"],
+        "acquisition_list": [
+          { "item": "<Item Name>", "priority": "<High/Medium/Low>", "reasoning": "<Why>" }
+        ]
+      }`;
+    }
+
+    const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
     Client Preferences: ${data.fitPreference || 'Tailored'}, Contrast: ${data.contrast || 'Medium'}
@@ -454,7 +491,7 @@ app.post("/api/chat", async (req, res, next) => {
     Available Wardrobe (JSON): ${vaultContext}
     
     CRITICAL DIRECTIVES:
-    1. Ignore any human features in the photo. Focus entirely on the clothing. 
+    1. Ignore any human features in the photo. Focus entirely on the clothing and geometry. 
     2. YOU MUST CALCULATE REAL SCORES based on the garments. DO NOT USE PLACEHOLDER NUMBERS.
     3. TIER CLASSIFICATION SYSTEM: You must strictly assign the "tier" based on your final calculated "score" using this exact scale:
        - 0 to 59 = "Baseline"
@@ -463,24 +500,8 @@ app.post("/api/chat", async (req, res, next) => {
        - 80 to 89 = "Refined"
        - 90 to 100 = "Elite"
     
-    YOUR OUTPUT MUST BE STRICTLY VALID JSON. DO NOT WRAP IN MARKDOWN. Example structure:
-    {
-      "score": 75,
-      "tier": "Intentional",
-      "verdict": "A brief summary of the look.",
-      "archetype": "The Executive",
-      "breakdown": { "color": 15, "occasion": 15, "fit": 15, "cohesion": 15, "presence": 15 },
-      "styling_notes": ["Note 1", "Note 2"],
-      "outfit_combinations": [
-        { "name": "Look Name", "reasoning": "Why this works", "item_urls": ["url1"] }
-      ],
-      "what_works": ["Strength 1"],
-      "recommendations": ["Upgrade 1"],
-      "missing_pieces": ["Gap 1"],
-      "acquisition_list": [
-        { "item": "Navy Blazer", "priority": "High", "reasoning": "Missing anchor piece" }
-      ]
-    }`;
+    YOUR OUTPUT MUST BE STRICTLY VALID JSON. DO NOT WRAP IN MARKDOWN. You must perfectly match this exact structure:
+    ${dynamicJSONSchema}`;
 
     const messages = [{ role: "system", content: systemPrompt }];
     
