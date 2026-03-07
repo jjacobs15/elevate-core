@@ -153,7 +153,17 @@ try {
       if (error) { document.getElementById('authErrorMsg').innerText = error.message; document.getElementById('authErrorMsg').style.display = 'block'; }
   });
 
-  document.getElementById('logoutBtn').addEventListener('click', async () => await supabaseClient.auth.signOut());
+  // UX UPDATE: Force UI reload and data flush on Sign Out
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('logoutBtn');
+      btn.innerText = "Signing Out...";
+      btn.disabled = true;
+      
+      await supabaseClient.auth.signOut();
+      localStorage.clear(); 
+      sessionStorage.clear();
+      window.location.reload(); 
+  });
 
   const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Outerwear": 5, "Bottom": 10, "Top": 2, "Accessory": 5, "Footwear": 10, "Default": 3 };
   const occasionMap = {
