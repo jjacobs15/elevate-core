@@ -1450,11 +1450,25 @@ try {
                     html += `<div class="day-card">`;
                     html += `<div class="day-header">${outfit.name || 'Workday'}</div>`;
                     html += `<div class="day-body">${outfit.reasoning || ''}</div>`;
-                    if (outfit.item_urls && outfit.item_urls.length > 0) {
-                        html += `<div class="day-items">`;
-                        outfit.item_urls.forEach(url => { html += `<img src="${url}" loading="lazy" alt="Outfit item">`; });
-                        html += `</div>`;
-                    }
+                   // Smart ID Lookup: Get the real URL from the Vault memory so the AI can't break it
+let validUrls = [];
+if (outfit.item_ids && outfit.item_ids.length > 0) {
+    validUrls = outfit.item_ids.map(id => {
+        const match = cachedVaultInventory.find(item => item.id === id);
+        return match ? match.image_url : null;
+    }).filter(Boolean); // Removes any nulls if the AI hallucinates a fake ID
+} else if (outfit.item_urls && outfit.item_urls.length > 0) {
+    // Legacy fallback just in case old dossiers still use URLs
+    validUrls = outfit.item_urls.filter(url => url.startsWith('http')); 
+}
+
+if (validUrls.length > 0) {
+    html += `<div style="display: flex; gap: 8px; overflow-x: auto;">`;
+    validUrls.forEach(url => { 
+        html += `<img src="${url}" style="width: 70px; height: 90px; object-fit: cover; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2);" alt="Outfit Item">`; 
+    });
+    html += `</div>`;
+}
                     html += `</div>`;
                 });
                 html += `</div></div>`;

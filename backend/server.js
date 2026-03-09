@@ -470,10 +470,9 @@ app.post("/api/chat", async (req, res, next) => {
         "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
         "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
         "styling_notes": ["<Note 1>", "<Note 2>"],
-        "outfit_combinations": [
-          { "name": "<Look Name>", "reasoning": "<Why this works>", "item_urls": ["<url1>"] }
-        ],
-        "what_works": ["<Strength 1>"],
+"outfit_combinations": [
+  { "name": "<Look Name>", "reasoning": "<Why this works>", "item_ids": ["<exact_id_from_vault>"] }
+],"what_works": ["<Strength 1>"],
         "recommendations": ["<Upgrade 1>"],
         "missing_pieces": ["<Gap 1>"],
         "acquisition_list": [
