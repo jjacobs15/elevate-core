@@ -174,7 +174,7 @@ try {
 
   const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Outerwear": 5, "Bottom": 10, "Top": 2, "Accessory": 5, "Footwear": 10, "Default": 3 };
   
-  // NEW: Gatekeeping requirements for the Master Planner
+  // Gatekeeping requirements for the Master Planner
   const PLANNER_REQUIREMENTS = {
       '1_day': { Top: 1, Bottom: 1 },
       'work_week': { Top: 5, Bottom: 3, Footwear: 2 },
@@ -420,7 +420,6 @@ try {
     }
   });
 
-  // NEW: Evaluate what Planner modes they have unlocked based on this inventory
   function evaluatePlannerEligibility() {
       const counts = { Top: 0, Bottom: 0, Outerwear: 0, Footwear: 0, Accessory: 0 };
       cachedVaultInventory.forEach(item => {
@@ -488,7 +487,6 @@ try {
         if (!backgroundOnly) vaultLoader.classList.add('hidden');
         cachedVaultInventory = data;
         
-        // Trigger eligibility check after inventory loads
         evaluatePlannerEligibility();
 
         const dirtyItems = cachedVaultInventory.filter(i => {
@@ -1026,8 +1024,25 @@ try {
           if (item.mode === 'wardrobe_builder') displayMode = "1-Day Look";
           if (item.mode === 'work_trip_curator') displayMode = "Work Trip";
 
+          // Replace the generic placeholder with a real image from the built outfit!
+          let thumbUrl = item.image_url;
+          if (thumbUrl.includes('dummyimage.com') && item.full_analysis?.outfit_combinations?.[0]) {
+              const firstCombo = item.full_analysis.outfit_combinations[0];
+              const firstId = firstCombo.item_ids?.[0] || firstCombo.item_urls?.[0]; // Handle both just in case
+              
+              if (firstId) {
+                  // Fuzzy match for thumbnail
+                  let match = cachedVaultInventory.find(v => v.id === firstId);
+                  if (!match) match = cachedVaultInventory.find(v => v.image_url === firstId);
+                  if (!match) match = cachedVaultInventory.find(v => v.notes && v.notes.toLowerCase().includes(String(firstId).toLowerCase()));
+                  
+                  if (match) thumbUrl = match.image_url;
+                  else if (typeof firstId === 'string' && firstId.startsWith('http')) thumbUrl = firstId;
+              }
+          }
+
           div.innerHTML = `
-            <img src="${item.image_url}" alt="Wardrobe analysis image" loading="lazy">
+            <img src="${thumbUrl}" alt="Wardrobe analysis image" loading="lazy">
             <div class="history-content">
               <div>
                 <div class="history-meta">
@@ -1443,6 +1458,33 @@ try {
     if (displayMode === 'wardrobe_builder' || displayMode === 'travel_curator' || displayMode === 'work_trip_curator' || displayMode === 'office_curation' || displayMode === 'morning_briefing') {
         if (data.outfit_combinations && data.outfit_combinations.length > 0) {
             
+            // THE FUZZY MATCHER: Maps whatever the AI returns to the real Vault Image
+            const resolveImages = (outfitObj) => {
+                let validUrls = [];
+                let validIds = [];
+                const returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
+
+                returnedItems.forEach(aiValue => {
+                    if (!aiValue) return;
+                    // 1. Try exact ID match
+                    let match = cachedVaultInventory.find(v => v.id === aiValue);
+                    // 2. Try exact URL match
+                    if (!match) match = cachedVaultInventory.find(v => v.image_url === aiValue);
+                    // 3. Try Fuzzy String Match on the clothing notes (if AI returned a description)
+                    if (!match) match = cachedVaultInventory.find(v => v.notes && v.notes.toLowerCase().includes(String(aiValue).toLowerCase()));
+                    
+                    if (match) {
+                        if (!validIds.includes(match.id)) { // Prevent duplicates
+                            validUrls.push(match.image_url);
+                            validIds.push(match.id);
+                        }
+                    } else if (typeof aiValue === 'string' && aiValue.startsWith('http')) {
+                        validUrls.push(aiValue); // Legacy fallback
+                    }
+                });
+                return { validUrls, validIds };
+            };
+
             if (displayMode === 'office_curation') {
                 html += `<div class="card"><div class="label">Weekly Office Rotation</div>`;
                 html += `<div class="week-grid">`;
@@ -1450,45 +1492,42 @@ try {
                     html += `<div class="day-card">`;
                     html += `<div class="day-header">${outfit.name || 'Workday'}</div>`;
                     html += `<div class="day-body">${outfit.reasoning || ''}</div>`;
-                   // Smart ID Lookup: Get the real URL from the Vault memory so the AI can't break it
-let validUrls = [];
-if (outfit.item_ids && outfit.item_ids.length > 0) {
-    validUrls = outfit.item_ids.map(id => {
-        const match = cachedVaultInventory.find(item => item.id === id);
-        return match ? match.image_url : null;
-    }).filter(Boolean); // Removes any nulls if the AI hallucinates a fake ID
-} else if (outfit.item_urls && outfit.item_urls.length > 0) {
-    // Legacy fallback just in case old dossiers still use URLs
-    validUrls = outfit.item_urls.filter(url => url.startsWith('http')); 
-}
-
-if (validUrls.length > 0) {
-    html += `<div style="display: flex; gap: 8px; overflow-x: auto;">`;
-    validUrls.forEach(url => { 
-        html += `<img src="${url}" style="width: 70px; height: 90px; object-fit: cover; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2);" alt="Outfit Item">`; 
-    });
-    html += `</div>`;
-}
+                    
+                    const { validUrls } = resolveImages(outfit);
+                    
+                    if (validUrls.length > 0) {
+                        html += `<div class="day-items">`;
+                        validUrls.forEach(url => { html += `<img src="${url}" loading="lazy" alt="Outfit item">`; });
+                        html += `</div>`;
+                    }
                     html += `</div>`;
                 });
                 html += `</div></div>`;
             } else {
                 html += `<div class="card"><div class="label">${displayMode === 'travel_curator' || displayMode === 'work_trip_curator' ? 'The Packing List' : (displayMode === 'morning_briefing' ? 'The Daily Recommendation' : 'Outfit Combinations')}</div>`;
-                data.outfit_combinations.forEach((outfit, index) => {
+                data.outfit_combinations.forEach((outfit) => {
                     html += `<div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(197, 160, 89, 0.1);">`;
                     html += `<div style="color: #F8FAFC; font-size: 13px; font-weight: 600; margin-bottom: 4px;">✦ ${outfit.name || 'Curated Look'}</div>`;
                     html += `<div style="color: #cbd5e1; font-size: 12px; margin-bottom: 10px; line-height: 1.4;">${outfit.reasoning || ''}</div>`;
                     
-                    if (outfit.item_urls && outfit.item_urls.length > 0) {
+                    const { validUrls, validIds } = resolveImages(outfit);
+                    
+                    if (validUrls.length > 0) {
                         html += `<div style="display: flex; gap: 8px; overflow-x: auto;">`;
-                        outfit.item_urls.forEach(url => { 
+                        validUrls.forEach(url => { 
                             html += `<img src="${url}" style="width: 70px; height: 90px; object-fit: cover; border-radius: 2px; border: 1px solid rgba(197, 160, 89, 0.2);" alt="Outfit Item">`; 
                         });
                         html += `</div>`;
                     }
                     
                     if (displayMode === 'morning_briefing' || displayMode === 'wardrobe_builder') {
-                       html += `<button class="action-btn" style="border-color: rgba(255,255,255,0.2); color: white; margin-top: 15px;" onclick="this.innerText='Wear Logged ✓'; this.style.borderColor='#10B981'; this.style.color='#10B981'; this.disabled=true;">Log This Wear</button>`;
+                       const idString = validIds.length > 0 ? validIds.map(id => `'${id}'`).join(', ') : '';
+                       if (idString) {
+                           html += `<button class="action-btn" style="border-color: rgba(255,255,255,0.2); color: white; margin-top: 15px;" onclick="triggerNightstandLog(this, ${idString})">Log This Wear</button>`;
+                       } else {
+                           // Fallback disabled button if no valid IDs found to log
+                           html += `<button class="action-btn" style="border-color: rgba(255,255,255,0.2); color: white; margin-top: 15px;" disabled>Items Not Loggable</button>`;
+                       }
                     }
                     
                     html += `</div>`;
