@@ -153,14 +153,12 @@ try {
       if (error) { document.getElementById('authErrorMsg').innerText = error.message; document.getElementById('authErrorMsg').style.display = 'block'; }
   });
 
-  // UX UPDATE: Force UI reload and data flush on Sign Out with Killswitch
   document.getElementById('logoutBtn').addEventListener('click', async () => {
       const btn = document.getElementById('logoutBtn');
       btn.innerText = "Signing Out...";
       btn.disabled = true;
       
       try {
-          // Give Supabase exactly 1.5 seconds to sign out cleanly on the backend
           await Promise.race([
               supabaseClient.auth.signOut(),
               new Promise(resolve => setTimeout(resolve, 1500))
@@ -169,13 +167,21 @@ try {
           console.warn("Sign out network drop ignored.");
       }
       
-      // THE NUCLEAR OPTION: Wipe local memory and force reload NO MATTER WHAT
       localStorage.clear(); 
       sessionStorage.clear();
       window.location.reload(); 
   });
 
   const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Outerwear": 5, "Bottom": 10, "Top": 2, "Accessory": 5, "Footwear": 10, "Default": 3 };
+  
+  // NEW: Gatekeeping requirements for the Master Planner
+  const PLANNER_REQUIREMENTS = {
+      '1_day': { Top: 1, Bottom: 1 },
+      'work_week': { Top: 5, Bottom: 3, Footwear: 2 },
+      'vacation': { Top: 4, Bottom: 2, Footwear: 2 },
+      'work_trip': { Top: 5, Bottom: 3, Outerwear: 1, Footwear: 2 }
+  };
+
   const occasionMap = {
     "Activity / Outdoor": ["Beach", "Country Club", "Game", "Golf Scramble", "Hiking", "PickleBall", "Yacht / Sailing"],
     "Casual / Everyday": ["Casual", "Church", "Grocery Shopping", "Running Errands in Town", "Smart Casual"],
@@ -414,6 +420,47 @@ try {
     }
   });
 
+  // NEW: Evaluate what Planner modes they have unlocked based on this inventory
+  function evaluatePlannerEligibility() {
+      const counts = { Top: 0, Bottom: 0, Outerwear: 0, Footwear: 0, Accessory: 0 };
+      cachedVaultInventory.forEach(item => {
+          if (counts[item.category] !== undefined) counts[item.category]++;
+      });
+
+      const plannerSelect = document.getElementById('plannerType');
+      if (!plannerSelect) return;
+
+      Array.from(plannerSelect.options).forEach(option => {
+          const reqs = PLANNER_REQUIREMENTS[option.value];
+          if (!reqs) return;
+
+          let isEligible = true;
+          let missingMsg = [];
+
+          for (const [cat, minNeeded] of Object.entries(reqs)) {
+              if (counts[cat] < minNeeded) {
+                  isEligible = false;
+                  missingMsg.push(`${minNeeded} ${cat}s`);
+              }
+          }
+
+          let baseText = option.text.split(' 🔒')[0];
+
+          if (isEligible) {
+              option.disabled = false;
+              option.text = baseText;
+          } else {
+              option.disabled = true;
+              option.text = `${baseText} 🔒 (Needs ${missingMsg.join(', ')})`;
+          }
+      });
+
+      if (plannerSelect.options[plannerSelect.selectedIndex]?.disabled) {
+          plannerSelect.value = '1_day';
+          handlePlannerChange(); 
+      }
+  }
+
   async function fetchVaultInventory(backgroundOnly = false) {
     if (!backgroundOnly) {
         vaultFeed.innerHTML = '';
@@ -440,6 +487,9 @@ try {
         
         if (!backgroundOnly) vaultLoader.classList.add('hidden');
         cachedVaultInventory = data;
+        
+        // Trigger eligibility check after inventory loads
+        evaluatePlannerEligibility();
 
         const dirtyItems = cachedVaultInventory.filter(i => {
           const limit = i.wear_threshold || WEAR_THRESHOLDS[i.category] || WEAR_THRESHOLDS["Default"];
