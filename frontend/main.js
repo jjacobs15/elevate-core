@@ -1162,7 +1162,8 @@ try {
 
   categoryEl.addEventListener('change', () => {
     const cat = categoryEl.value;
-    occasionEl.innerHTML = '<option value="">Select Occasion</option>';
+    // UX FIX: Updated specific event dropdown text
+    occasionEl.innerHTML = '<option value="">Select Specific Event</option>';
     occasionEl.disabled = !cat;
     if (cat === 'Other') {
       customOccasionEl.classList.remove('hidden');
@@ -1204,10 +1205,10 @@ try {
         if (pType === 'work_trip') activeApiMode = 'work_trip_curator';
     }
 
-    // FIX: Ensure Occasion is strictly checked ONLY for the relevant modes
+    // UX FIX: Updated specific event alert text
     if (activeApiMode === 'evaluate' || activeApiMode === 'wardrobe_builder') {
         const selectedOccasion = categoryEl.value === 'Other' ? customOccasionEl.value : occasionEl.value;
-        if (!selectedOccasion) return alert("Please select a Target Occasion.");
+        if (!selectedOccasion) return alert("Please select a Specific Event.");
     }
     
     if (activeApiMode !== 'wardrobe_builder' && activeApiMode !== 'travel_curator' && activeApiMode !== 'office_curation' && activeApiMode !== 'work_trip_curator' && activeApiMode !== 'morning_briefing' && !imageInput.files[0]) {
