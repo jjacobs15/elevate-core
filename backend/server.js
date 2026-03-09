@@ -425,6 +425,7 @@ app.post("/api/chat", async (req, res, next) => {
 
     const safeImage = cleanBase64(data.image);
 
+    // Run image upload entirely in the background so it doesn't block the AI generation
     if (safeImage) {
       const imageBuffer = Buffer.from(safeImage, "base64");
       const fileName = `${req.user.id}/${reqId}.jpg`; 
@@ -434,7 +435,7 @@ app.post("/api/chat", async (req, res, next) => {
              const { data: { publicUrl } } = req.supabase.storage.from("wardrobe_images").getPublicUrl(fileName);
              await req.supabase.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
           }
-        });
+        }).catch(err => console.error(`[${reqId}] Image upload failed:`, err.message));
     }
 
     let vaultContext = "No wardrobe items available.";
@@ -445,9 +446,7 @@ app.post("/api/chat", async (req, res, next) => {
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // 🚀 PRODUCTION FIX: Cleaned up Dynamic Schema for exact adherence
     let dynamicJSONSchema = "";
-    
     if (data.mode === 'fit') {
       dynamicJSONSchema = `{
         "score": <calculate a number between 0 and 100 representing overall fit/proportion>,
@@ -518,31 +517,59 @@ app.post("/api/chat", async (req, res, next) => {
         messages.push({ role: "user", content: `Please execute styling core. Notes: ${data.notes || 'No notes'}` });
     }
 
-    const result = await streamText({ model: aiSdkOpenAi("gpt-4o"), messages: messages, temperature: 0.3 });
-
+    // Wrap the stream in a try/catch to prevent orphaned requests if OpenAI drops the connection
     let fullResponse = "";
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    for await (const chunk of result.textStream) {
-        fullResponse += chunk;
-        res.write(chunk);
-    }
-    res.end();
-
     try {
-        let cleanJson = fullResponse.trim().replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+        const result = await streamText({ 
+            model: aiSdkOpenAi("gpt-4o"), 
+            messages: messages, 
+            temperature: 0.3 
+        });
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Transfer-Encoding', 'chunked');
+
+        for await (const chunk of result.textStream) {
+            fullResponse += chunk;
+            res.write(chunk);
+        }
+        res.end();
+    } catch (streamError) {
+        console.error(`[${reqId}] OpenAI Stream Failure:`, streamError.message);
+        if (!res.headersSent) {
+            return res.status(502).json({ error: "AI Engine connection dropped. Please try again." });
+        } else {
+            res.end(); // Safely terminate the broken stream
+            return;
+        }
+    }
+
+    // Aggressively clean the markdown formatting just in case the AI wraps it in ```json 
+    try {
+        let cleanJson = fullResponse.trim();
+        if (cleanJson.startsWith('```')) {
+            cleanJson = cleanJson.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        }
+        
         const parsedJson = JSON.parse(cleanJson);
         await req.supabase.from("wardrobe_analyses").update({ 
-            full_analysis: parsedJson, score: parsedJson.score || null, tier: parsedJson.tier || null, verdict: parsedJson.verdict || "Analysis Complete"
+            full_analysis: parsedJson, 
+            score: parsedJson.score || null, 
+            tier: parsedJson.tier || null, 
+            verdict: parsedJson.verdict || "Analysis Complete"
         }).eq("id", reqId);
     } catch (e) {
-        console.error(`[${reqId}] Failed to save final JSON state:`, e.message);
+        console.error(`[${reqId}] Failed to parse/save final JSON state. Bad AI formatting.`, e.message);
     }
 
-  } catch (err) { next(err); }
+  } catch (err) { 
+      // Only pass to global error handler if headers haven't been sent yet
+      if (!res.headersSent) next(err); 
+      else console.error("Post-stream error:", err.message);
+  }
 });
 
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error(`[Global Error] ${req.method} ${req.url}:`, err.message);
   if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid request payload" });

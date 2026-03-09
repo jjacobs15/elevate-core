@@ -1227,7 +1227,6 @@ try {
 
   categoryEl.addEventListener('change', () => {
     const cat = categoryEl.value;
-    // UX FIX: Updated specific event dropdown text
     occasionEl.innerHTML = '<option value="">Select Specific Event</option>';
     occasionEl.disabled = !cat;
     if (cat === 'Other') {
@@ -1270,7 +1269,6 @@ try {
         if (pType === 'work_trip') activeApiMode = 'work_trip_curator';
     }
 
-    // UX FIX: Updated specific event alert text
     if (activeApiMode === 'evaluate' || activeApiMode === 'wardrobe_builder') {
         const selectedOccasion = categoryEl.value === 'Other' ? customOccasionEl.value : occasionEl.value;
         if (!selectedOccasion) return alert("Please select a Specific Event.");
@@ -1458,30 +1456,74 @@ try {
     if (displayMode === 'wardrobe_builder' || displayMode === 'travel_curator' || displayMode === 'work_trip_curator' || displayMode === 'office_curation' || displayMode === 'morning_briefing') {
         if (data.outfit_combinations && data.outfit_combinations.length > 0) {
             
-            // THE FUZZY MATCHER: Maps whatever the AI returns to the real Vault Image
+            // THE TEFLON MATCHER: Aggressively forces images to render no matter how the AI formats its response
             const resolveImages = (outfitObj) => {
                 let validUrls = [];
                 let validIds = [];
                 const returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
 
-                returnedItems.forEach(aiValue => {
-                    if (!aiValue) return;
-                    // 1. Try exact ID match
-                    let match = cachedVaultInventory.find(v => v.id === aiValue);
-                    // 2. Try exact URL match
-                    if (!match) match = cachedVaultInventory.find(v => v.image_url === aiValue);
-                    // 3. Try Fuzzy String Match on the clothing notes (if AI returned a description)
-                    if (!match) match = cachedVaultInventory.find(v => v.notes && v.notes.toLowerCase().includes(String(aiValue).toLowerCase()));
-                    
-                    if (match) {
-                        if (!validIds.includes(match.id)) { // Prevent duplicates
-                            validUrls.push(match.image_url);
-                            validIds.push(match.id);
+                // Fallback 1: If AI completely failed to make an array, extract items straight from its paragraph!
+                if (returnedItems.length === 0 && outfitObj.reasoning) {
+                    const text = outfitObj.reasoning.toLowerCase();
+                    cachedVaultInventory.forEach(v => {
+                        const note = (v.notes || '').toLowerCase();
+                        if (note && note.length > 3 && text.includes(note) && !validIds.includes(v.id)) {
+                            validUrls.push(v.image_url);
+                            validIds.push(v.id);
                         }
-                    } else if (typeof aiValue === 'string' && aiValue.startsWith('http')) {
-                        validUrls.push(aiValue); // Legacy fallback
+                    });
+                }
+
+                // Fallback 2: The Aggressive Word-by-Word Scoring System
+                returnedItems.forEach(aiValue => {
+                    if (!aiValue || typeof aiValue !== 'string') return;
+                    
+                    let match = cachedVaultInventory.find(v => v.id === aiValue);
+                    if (!match) match = cachedVaultInventory.find(v => v.image_url === aiValue);
+                    
+                    if (!match) {
+                        let bestScore = 0;
+                        let bestItem = null;
+                        const searchStr = aiValue.toLowerCase();
+                        
+                        cachedVaultInventory.forEach(v => {
+                            if (validIds.includes(v.id)) return; // Prevent duplicate images
+
+                            let score = 0;
+                            const note = (v.notes || '').toLowerCase();
+                            const cat = (v.category || '').toLowerCase();
+                            
+                            // High points for exact phrase matches
+                            if (note && searchStr.includes(note)) score += 10;
+                            if (note && note.includes(searchStr)) score += 10;
+                            
+                            // Low points for single word overlaps
+                            const words = searchStr.split(/[\s,.-]+/).filter(w => w.length > 2);
+                            words.forEach(w => {
+                                if (note.includes(w)) score += 2;
+                                if (cat.includes(w)) score += 1;
+                            });
+
+                            // Crown the winner
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestItem = v;
+                            }
+                        });
+
+                        if (bestScore >= 2) { 
+                            match = bestItem;
+                        }
+                    }
+                    
+                    if (match && !validIds.includes(match.id)) {
+                        validUrls.push(match.image_url);
+                        validIds.push(match.id);
+                    } else if (aiValue.startsWith('http') && !validUrls.includes(aiValue)) {
+                        validUrls.push(aiValue); 
                     }
                 });
+
                 return { validUrls, validIds };
             };
 
@@ -1525,7 +1567,6 @@ try {
                        if (idString) {
                            html += `<button class="action-btn" style="border-color: rgba(255,255,255,0.2); color: white; margin-top: 15px;" onclick="triggerNightstandLog(this, ${idString})">Log This Wear</button>`;
                        } else {
-                           // Fallback disabled button if no valid IDs found to log
                            html += `<button class="action-btn" style="border-color: rgba(255,255,255,0.2); color: white; margin-top: 15px;" disabled>Items Not Loggable</button>`;
                        }
                     }
