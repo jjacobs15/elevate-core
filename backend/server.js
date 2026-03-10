@@ -439,7 +439,9 @@ app.post("/api/chat", async (req, res, next) => {
     }
 
     let vaultContext = "No wardrobe items available.";
-    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board"].includes(data.mode)) {
+    
+    // UPDATED: Added "match_vibe" to the list of modes that inject the user's closet
+    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
             .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
@@ -481,6 +483,13 @@ app.post("/api/chat", async (req, res, next) => {
       }`;
     }
 
+    // UPDATED: Dynamic directive specific to the new feature
+    let modeSpecificInstructions = "";
+    if (data.mode === 'match_vibe') {
+        modeSpecificInstructions = `
+    MATCH MY VIBE DIRECTIVE: The provided image is the user's partner. Do NOT critique the partner's fit. Instead, extract their color palette, formality level, and core aesthetic. Generate highly coordinated and complementary outfit options for the user STRICTLY from the 'Available Wardrobe' provided. Use traditional color theory (complementary, analogous, monochromatic). Detail the color theory and aesthetic matching logic in your 'reasoning'.`;
+    }
+
     const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
@@ -488,6 +497,7 @@ app.post("/api/chat", async (req, res, next) => {
     Climate Context: ${data.climate || 'Unknown'}
     Measurements: ${JSON.stringify(data.measurements || {})}
     Available Wardrobe (JSON): ${vaultContext}
+    ${modeSpecificInstructions}
     
     CRITICAL DIRECTIVES:
     1. Ignore any human features in the photo. Focus entirely on the clothing and geometry. 

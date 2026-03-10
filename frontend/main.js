@@ -6,6 +6,7 @@
 // - Avoids duplicate event binding
 // - Adds config validation and guarded initialization
 // - Keeps the single-file structure for easier drop-in replacement
+// - Added "Match My Vibe" (match_vibe) integration
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -341,6 +342,7 @@ function normalizeModeLabel(mode) {
   if (!mode) return 'Unknown';
   if (mode === 'wardrobe_builder') return '1-Day Look';
   if (mode === 'work_trip_curator') return 'Work Trip';
+  if (mode === 'match_vibe') return 'Match My Vibe';
   return mode.replace(/_/g, ' ');
 }
 
@@ -782,6 +784,20 @@ function updateTailorUI() {
     return;
   }
 
+  if (STATE.currentMode === 'match_vibe') {
+    setText(DOM.evaluateBtn, 'Coordinate Outfit');
+    DOM.tailorInstructions.innerHTML = '* Upload or snap a photo of your partner. The Styling Core will analyze their vibe and build a complementary outfit from your vault.';
+    setVisible(DOM.selectionBlock, true);
+    setVisible(DOM.buildDateBlock, false);
+    setVisible(DOM.plannerBlock, false);
+    setVisible(DOM.tailorBlock, false);
+    setVisible(DOM.occasionBlock, true);
+    setVisible(DOM.travelInputs, false);
+    setVisible(DOM.uploadTrigger, true);
+    setVisible(DOM.imageFrame, Boolean(DOM.imageInput.files?.[0]));
+    return;
+  }
+
   if (STATE.currentMode === 'wardrobe_planner') {
     setVisible(DOM.selectionBlock, true);
     setVisible(DOM.plannerBlock, true);
@@ -831,7 +847,7 @@ function getSelectedOccasion() {
 }
 
 function requireEvaluationInputs(mode) {
-  if (mode === 'evaluate' || mode === 'wardrobe_builder') {
+  if (mode === 'evaluate' || mode === 'wardrobe_builder' || mode === 'match_vibe') {
     if (!getSelectedOccasion()) throw new Error('Please select a specific event.');
   }
 
@@ -859,6 +875,7 @@ function getLoadingMessage(mode) {
   if (mode === 'work_trip_curator') return 'Curating work trip capsule...';
   if (mode === 'office_curation') return 'Curating your weekly office wardrobe...';
   if (mode === 'morning_briefing') return 'Fetching climate data and building daily outfit...';
+  if (mode === 'match_vibe') return 'Extracting partner\'s color theory & style...';
   return 'Engaging the Styling Core...';
 }
 
@@ -870,6 +887,7 @@ function getActionText(mode) {
   if (mode === 'work_trip_curator') return 'Calculating optimal business trip capsule...';
   if (mode === 'office_curation') return 'Calculating 5-day professional rotation...';
   if (mode === 'morning_briefing') return 'Constructing your zero-friction outfit...';
+  if (mode === 'match_vibe') return 'Calculating complementary wardrobe combinations...';
   return 'Analyzing wardrobe and curating...';
 }
 
@@ -896,6 +914,8 @@ function buildAnalysisPayload({ image, mode, climateData }) {
     finalNotes = `SYSTEM ANCHOR (Start of Work Week): ${DOM.targetDate.value}. | User Notes: ${finalNotes}`;
   } else if (mode === 'morning_briefing') {
     finalNotes = `SYSTEM ANCHOR (Today's Date): ${DOM.evalDate.value}. | User Notes: ${finalNotes}`;
+  } else if (mode === 'match_vibe') {
+    finalNotes = `SYSTEM ANCHOR: The provided image is the user's partner. Analyze their color palette, formality, and aesthetic. Curate an outfit for the user that complements this look for the occasion. | User Notes: ${finalNotes}`;
   } else if (mode === 'travel_curator' || mode === 'work_trip_curator') {
     const dep = DOM.departureDate.value;
     const ret = DOM.returnDate.value;
@@ -1041,7 +1061,7 @@ function generateHTMLFromData(data, displayMode) {
     html += `<div class="card"><div class="label">Sartorial Breakdown</div><div class="breakdown-grid">${createBar('Color', breakdown.color || 0)}${createBar('Occasion', breakdown.occasion || 0)}${createBar('Fit', breakdown.fit || 0)}${createBar('Cohesion', breakdown.cohesion || 0)}${createBar('Presence', breakdown.presence || 0)}</div></div>`;
   }
 
-  if (['wardrobe_builder', 'travel_curator', 'work_trip_curator', 'office_curation', 'morning_briefing'].includes(displayMode)) {
+  if (['wardrobe_builder', 'travel_curator', 'work_trip_curator', 'office_curation', 'morning_briefing', 'match_vibe'].includes(displayMode)) {
     if (Array.isArray(data.outfit_combinations) && data.outfit_combinations.length > 0) {
       if (displayMode === 'office_curation') {
         html += '<div class="card"><div class="label">Weekly Office Rotation</div><div class="week-grid">';
@@ -1063,7 +1083,9 @@ function generateHTMLFromData(data, displayMode) {
           ? 'The Packing List'
           : displayMode === 'morning_briefing'
             ? 'The Daily Recommendation'
-            : 'Outfit Combinations';
+            : displayMode === 'match_vibe'
+              ? 'Coordinated Outfits'
+              : 'Outfit Combinations';
 
         html += `<div class="card"><div class="label">${escapeHtml(label)}</div>`;
         data.outfit_combinations.forEach((outfit) => {
@@ -1080,7 +1102,7 @@ function generateHTMLFromData(data, displayMode) {
             html += '</div>';
           }
 
-          if ((displayMode === 'morning_briefing' || displayMode === 'wardrobe_builder') && validIds.length > 0) {
+          if ((displayMode === 'morning_briefing' || displayMode === 'wardrobe_builder' || displayMode === 'match_vibe') && validIds.length > 0) {
             html += `<button class="action-btn js-log-nightstand" data-item-ids="${escapeHtml(JSON.stringify(validIds))}" style="border-color:rgba(255,255,255,0.2); color:white; margin-top:15px;">Log This Wear</button>`;
           }
 
