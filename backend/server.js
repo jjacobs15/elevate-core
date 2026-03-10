@@ -483,11 +483,15 @@ app.post("/api/chat", async (req, res, next) => {
       }`;
     }
 
-    // UPDATED: Dynamic directive specific to the new feature
+   // UPDATED: Dynamic directive specific to the new feature with strict ID enforcement
     let modeSpecificInstructions = "";
     if (data.mode === 'match_vibe') {
         modeSpecificInstructions = `
-    MATCH MY VIBE DIRECTIVE: The provided image is the user's partner. Do NOT critique the partner's fit. Instead, extract their color palette, formality level, and core aesthetic. Generate highly coordinated and complementary outfit options for the user STRICTLY from the 'Available Wardrobe' provided. Use traditional color theory (complementary, analogous, monochromatic). Detail the color theory and aesthetic matching logic in your 'reasoning'.`;
+    MATCH MY VIBE DIRECTIVE: The provided image is the user's partner. Do NOT critique the partner's fit. 
+    1. Extract the partner's color palette, formality level, and core aesthetic. 
+    2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe' JSON provided. 
+    3. CRITICAL IMAGE RENDERING RULE: For EVERY item you select for the user, you MUST copy its exact string "id" from the JSON and place it into the "item_ids" array in your output. If you fail to include the exact IDs, the app will break and the images will not load. Do not invent items.
+    4. Detail the color matching theory used (e.g., complementary, analogous) in your 'reasoning'.`;
     }
 
     const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
