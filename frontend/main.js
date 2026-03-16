@@ -955,16 +955,33 @@ async function readStreamingJsonResponse(response) {
   const decoder = new TextDecoder();
   let fullText = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    fullText += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      fullText += decoder.decode(value, { stream: true });
+    }
+    // Flush the decoder
+    fullText += decoder.decode(); 
+  } finally {
+    reader.releaseLock();
   }
 
-  const cleanJson = fullText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(cleanJson);
-}
+  // Handle potential Markdown formatting from the AI
+  const cleanJson = fullText.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 
+  if (!cleanJson) throw new Error('Received empty response from the Styling Core.');
+
+  try {
+    return JSON.parse(cleanJson);
+  } catch (e) {
+    console.error("JSON Parse Error. Raw Text:", fullText);
+    throw new Error('Styling Core returned an invalid data format.');
+  }
+}
 function renderList(label, items, icon = '•') {
   if (!Array.isArray(items) || items.length === 0) return '';
   return `<div class="card"><div class="label">${escapeHtml(label)}</div>${items.map((item) => `<span class="list-item">${escapeHtml(icon)} ${escapeHtml(item)}</span>`).join('')}</div>`;
