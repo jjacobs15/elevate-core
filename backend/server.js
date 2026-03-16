@@ -113,6 +113,60 @@ const RequestSchema = z.object({
     edgeCaseMode: z.boolean().optional()
 });
 
+// Input Validation for User Profiles
+const ProfileUpdateSchema = z.object({
+    measurements: z.record(z.any()),
+    silhouette_id: z.string().nullable().optional()
+});
+
+// ==========================================
+//   USER PROFILE & MEASUREMENTS (MASTER'S LEDGER)
+// ==========================================
+
+app.get("/api/user/measurements", async (req, res, next) => {
+  try {
+    const { data, error } = await req.supabase
+      .from("user_profiles")
+      .select("measurements, silhouette_id")
+      .eq("user_id", req.user.id)
+      .single();
+
+    // Ignore PGRST116 (No rows found) because new users won't have a profile yet
+    if (error && error.code !== 'PGRST116') {
+        throw new Error(error.message);
+    }
+
+    res.json({ success: true, profile: data || { measurements: {}, silhouette_id: null } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/user/measurements", async (req, res, next) => {
+  try {
+    // Rely on Zod to enforce payload integrity; global error handler catches fails
+    const { measurements, silhouette_id } = ProfileUpdateSchema.parse(req.body);
+
+    const { data, error } = await req.supabase
+      .from("user_profiles")
+      .upsert({
+        user_id: req.user.id,
+        measurements: measurements,
+        silhouette_id: silhouette_id || null,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    res.json({ success: true, profile: data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+
 // ==========================================
 //   STUDIO POLISH 
 // ==========================================
