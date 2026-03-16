@@ -20,7 +20,7 @@ const REQUIRED_ENVS = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", "S
 for (const env of REQUIRED_ENVS) {
   if (!process.env[env]) {
     console.error(`❌ FATAL: Missing ${env}. Exiting process.`);
-    process.exit(1);
+    process.exit(1); 
   }
 }
 
@@ -29,7 +29,7 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-app.set("trust proxy", 1);
+app.set("trust proxy", 1); 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -42,26 +42,24 @@ const allowedOrigins = [
     "http://127.0.0.1:5173"
 ].filter(Boolean);
 
-app.use(cors({
+app.use(cors({ 
     origin: function(origin, callback) {
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             callback(new Error('CORS block: Origin not allowed'));
         }
-    },
+    }, 
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Production-tuned limiter
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30,
+  max: 30, 
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "The atelier is currently at capacity. Please wait a moment." },
-  skipFailedRequests: true // Don't count failed auth attempts toward the limit
+  message: { error: "The atelier is currently at capacity. Please wait a moment." }
 });
 
 const cleanBase64 = (imageString) => {
@@ -70,7 +68,7 @@ const cleanBase64 = (imageString) => {
 };
 
 app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ONLINE", version: "1.2.0", message: "EleVate Engine is operational." });
+    res.status(200).json({ status: "ONLINE", message: "EleVate Engine is operational." });
 });
 
 // ==========================================
@@ -84,11 +82,9 @@ const requireAuth = async (req, res, next) => {
         }
 
         const token = authHeader.split(" ")[1];
-        // Verify against Supabase
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
         if (error || !user) throw new Error("Invalid session token.");
 
-        // Create scoped client for the request
         req.supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
             global: { headers: { Authorization: `Bearer ${token}` } }
         });
@@ -101,7 +97,6 @@ const requireAuth = async (req, res, next) => {
     }
 };
 
-// Apply security to all /api routes
 app.use("/api", limiter, requireAuth);
 
 const RequestSchema = z.object({
@@ -119,153 +114,485 @@ const RequestSchema = z.object({
 });
 
 // ==========================================
-//   CORE AI STYLING ENGINE (REFACTORED)
+//   STUDIO POLISH 
 // ==========================================
-app.post("/api/chat", async (req, res, next) => {
-    const reqId = crypto.randomUUID();
-    console.log(`[${reqId}] Request: ${req.body.mode} | User: ${req.user.id}`);
+app.post("/api/remove-bg", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "No image provided" });
 
+    const base64Data = cleanBase64(image);
+    
     try {
-        const data = RequestSchema.parse(req.body);
-        const vaultPlaceholder = "https://dummyimage.com/600x400/020617/c5a059.png&text=Wardrobe+Curated+Outfit";
-
-        // 1. Initial Database Entry
-        const { error: initialDbError } = await req.supabase
-            .from("wardrobe_analyses")
-            .insert([{
-                id: reqId, 
-                user_id: req.user.id, 
-                mode: data.mode, 
-                occasion: data.occasion || null,
-                mood: data.mood || null, 
-                notes: data.notes || null, 
-                image_url: data.image ? "pending_upload" : vaultPlaceholder
-            }]);
-
-        if (initialDbError) throw new Error(`DB Init Failed: ${initialDbError.message}`);
-
-        // 2. Async Image Handling (Non-blocking)
-        const safeImage = cleanBase64(data.image);
-        if (safeImage) {
-            const imageBuffer = Buffer.from(safeImage, "base64");
-            const fileName = `${req.user.id}/${reqId}.jpg`;
-            
-            // Background task
-            (async () => {
-                try {
-                    const { error: upError } = await req.supabase.storage.from("wardrobe_images")
-                        .upload(fileName, imageBuffer, { contentType: "image/jpeg", upsert: false });
-                    
-                    if (!upError) {
-                        const { data: { publicUrl } } = req.supabase.storage.from("wardrobe_images").getPublicUrl(fileName);
-                        await req.supabase.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
-                    }
-                } catch (e) {
-                    console.error(`[${reqId}] Image Storage Error:`, e.message);
-                }
-            })();
-        }
-
-        // 3. Context Preparation
-        let vaultContext = "No wardrobe items available.";
-        if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
-            const { data: vaultItems } = await req.supabase
-                .from("my_closet")
-                .select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
-                .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
-                .order("total_wears", { ascending: true })
-                .limit(50);
-            if (vaultItems?.length > 0) vaultContext = JSON.stringify(vaultItems);
-        }
-
-        // 4. Schema Selection
-        const baseSchema = {
-            score: "number 0-100",
-            tier: "Baseline/Functional/Intentional/Refined/Elite",
-            verdict: "summary string",
-            archetype: "style archetype",
-            missing_pieces: ["item 1"],
-        };
-
-        const dynamicJSONSchema = data.mode === 'fit' ? 
-            { ...baseSchema, fit_anatomy: { shoulders: [], waist: [], legs: [] }, alteration_blueprint: [] } : 
-            { ...baseSchema, breakdown: {}, outfit_combinations: [{ name: "", reasoning: "", item_ids: [] }], styling_notes: [] };
-
-        const systemPrompt = `You are EleVate's Master Stylist.
-        Mode: ${data.mode} | Occasion: ${data.occasion || 'General'}
-        Wardrobe Context: ${vaultContext}
-        STRICT RULES:
-        1. Return ONLY valid JSON.
-        2. Assign Tier based on Score: 0-59: Baseline, 60-69: Functional, 70-79: Intentional, 80-89: Refined, 90-100: Elite.
-        3. If using wardrobe items, use exact "id" strings.
-        Schema: ${JSON.stringify(dynamicJSONSchema)}`;
-
-        // 5. Execution
-        const messages = [{ role: "system", content: systemPrompt }];
-        if (safeImage) {
-            messages.push({
-                role: "user",
-                content: [
-                    { type: "text", text: `Analyze this image. Notes: ${data.notes || 'None'}.` },
-                    { type: "image", image: Buffer.from(safeImage, "base64") }
-                ]
-            });
-        } else {
-            messages.push({ role: "user", content: `Execute styling core. Notes: ${data.notes || 'No notes'}` });
-        }
-
-        const result = await streamText({
-            model: aiSdkOpenAi("gpt-4o"),
-            messages,
-            temperature: 0.3,
-            onFinish: async (event) => {
-                // Background update of final record once stream ends
-                try {
-                    let cleanText = event.text.trim();
-                    if (cleanText.startsWith('```')) {
-                        cleanText = cleanText.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-                    }
-                    const parsed = JSON.parse(cleanText);
-                    await req.supabase.from("wardrobe_analyses").update({
-                        full_analysis: parsed,
-                        score: parsed.score || null,
-                        tier: parsed.tier || null,
-                        verdict: parsed.verdict || "Analysis Complete"
-                    }).eq("id", reqId);
-                } catch (e) {
-                    console.error(`[${reqId}] Final DB Update Failed:`, e.message);
-                }
-            }
+        const bgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
+          method: 'POST',
+          headers: { 
+            'X-Api-Key': process.env.REMOVE_BG_API_KEY,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json' 
+          },
+          body: JSON.stringify({ image_file_b64: base64Data, size: 'preview' })
         });
 
-        // Use the native Vercel AI SDK helper to pipe to response safely
-        return result.pipeTextIntoResponse(res);
-
-    } catch (err) {
-        console.error(`[${reqId}] Fatal Route Error:`, err.message);
-        if (!res.headersSent) {
-            return res.status(err instanceof z.ZodError ? 400 : 500).json({ 
-                error: err.message || "An internal server error occurred." 
-            });
-        }
+        if (!bgRes.ok) throw new Error("RemoveBG limit reached or request failed.");
+        const data = await bgRes.json();
+        return res.json({ image: `data:image/png;base64,${data.data.result_b64}` });
+    } catch (bgError) {
+        console.warn("[RemoveBG Warning] Falling back to original image:", bgError.message);
+        return res.json({ image: `data:image/jpeg;base64,${base64Data}` });
     }
+  } catch (error) {
+    next(error);
+  }
 });
 
-// All other routes remain largely the same, but ensure they use res.json() correctly.
-// [Include your ledger/tagging routes here, ensuring try/catch wrappers]
+// ==========================================
+//   AUTO-TAGGING 
+// ==========================================
+app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Image required for tagging" });
+
+    const safeImage = cleanBase64(image);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    const TaggingSchema = z.object({
+      primary_color: z.string().describe("The dominant color"),
+      secondary_color: z.string().nullable().describe("The accent color, or null"),
+      pattern: z.string(),
+      seasonality: z.enum(["Summer", "Winter", "All-Season", "Fall/Spring"]),
+      fabric_weight_category: z.enum(["Heavyweight", "Midweight", "Lightweight", "Tropical"]),
+      drape_index: z.number().min(1).max(10).describe("1 = Stiff/Structured, 10 = Flowing/Unstructured"),
+      estimated_lifespan_wears: z.number().describe("Estimated wears before needing replacement")
+    });
+
+    try {
+        const { object } = await generateObject({
+          model: aiSdkOpenAi("gpt-4o-mini"),
+          schema: TaggingSchema,
+          messages: [
+            { 
+              role: "user", 
+              content: [
+                { type: "text", text: "Analyze this garment. Identify its visual properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
+                { type: "image", image: imageBuffer } 
+              ] 
+            }
+          ],
+          temperature: 0.1,
+        });
+        res.json({ success: true, tags: object });
+    } catch (aiError) {
+        console.warn("[Auto-Tag Warning] Returning default tags:", aiError.message);
+        res.json({ success: true, tags: {
+            primary_color: "Unknown", secondary_color: null, pattern: "Solid",
+            seasonality: "All-Season", fabric_weight_category: "Midweight",
+            drape_index: 5, estimated_lifespan_wears: 100
+        }});
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   CARE TAG ANALYSIS 
+// ==========================================
+app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Image required" });
+
+    const safeImage = cleanBase64(image);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    const CareTagSchema = z.object({
+      careProfile: z.object({
+        instructions: z.array(z.string()).describe("List of care instructions found on tag"),
+        is_machine_washable: z.boolean().describe("True if machine washing is allowed")
+      })
+    });
+
+    try {
+        const { object } = await generateObject({
+          model: aiSdkOpenAi("gpt-4o-mini"),
+          schema: CareTagSchema,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Read this clothing care tag. Extract washing and drying instructions." },
+                { type: "image", image: imageBuffer }
+              ]
+            }
+          ],
+          temperature: 0.1,
+        });
+        res.json(object);
+    } catch (aiError) {
+        console.warn("[Care Tag Warning] Returning defaults:", aiError.message);
+        res.json({ careProfile: { instructions: ["Read physical tag"], is_machine_washable: true } });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   GHOST SIMULATION (ANCHOR PIECE CURATOR)
+// ==========================================
+app.post("/api/designer/ghost-simulation", async (req, res, next) => {
+  try {
+    const { ghostItemImageBase64, ghostItemDescription } = req.body;
+    if (!ghostItemImageBase64) return res.status(400).json({ error: "Image required" });
+
+    const safeImage = cleanBase64(ghostItemImageBase64);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    let vaultContext = "No existing wardrobe items available.";
+    const { data: vaultItems } = await req.supabase
+        .from("my_closet")
+        .select("category, notes, primary_color, pattern")
+        .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
+        .limit(50);
+        
+    if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+
+    const GhostSchema = z.object({
+      simulation: z.object({
+        versatility_index: z.number().describe("Score 0-100 on how well this piece integrates."),
+        aesthetic_impact: z.string().describe("A 2-sentence breakdown of how this piece elevates the wardrobe."),
+        sample_outfits: z.array(z.object({
+          outfit_name: z.string(),
+          reasoning: z.string(),
+          existing_categories_used: z.array(z.string())
+        })),
+        missing_pieces: z.array(z.string()).describe("Items the user should buy next to complete the look.")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o"),
+      schema: GhostSchema,
+      messages: [
+        { role: "system", content: `You are EleVate's Master Stylist. Evaluate this new anchor piece (${ghostItemDescription || "Garment"}). Available Wardrobe: ${vaultContext}` },
+        { role: "user", content: [
+            { type: "text", text: "Simulate outfits using this anchor piece and the available wardrobe." }, 
+            { type: "image", image: imageBuffer }
+          ] 
+        }
+      ],
+      temperature: 0.3,
+    });
+
+    res.json(object);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   CHRONOS AESTHETIC HEATMAP
+// ==========================================
+app.get("/api/analytics/chronos", async (req, res, next) => {
+  try {
+    const { data: dossiers, error } = await req.supabase
+      .from("wardrobe_analyses")
+      .select("score, verdict, created_at")
+      .not("score", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (error) throw new Error(error.message);
+    
+    if (!dossiers || dossiers.length < 2) {
+      return res.json({ message: "Not enough data yet. Run at least 2 Stylist evaluations to unlock Chronos." });
+    }
+
+    const ChronosSchema = z.object({
+      chronos: z.object({
+        trajectory: z.enum(["Improving", "Stagnant", "Declining"]),
+        average_score_shift: z.string().describe("e.g., '+5 points' or '-2 points'"),
+        aesthetic_drift: z.string().describe("A 2-sentence analysis of how their style is evolving based on recent verdicts."),
+        course_correction: z.string().describe("1 actionable piece of advice to improve their next look.")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o"),
+      schema: ChronosSchema,
+      messages: [
+        {
+          role: "system",
+          content: `You are EleVate's Chronos AI. Analyze this user's recent outfit scores and verdicts to determine their style evolution: ${JSON.stringify(dossiers)}`
+        },
+        {
+          role: "user",
+          content: "Generate the Chronos Aesthetic Heatmap analysis based on my history."
+        }
+      ],
+      temperature: 0.3,
+    });
+
+    res.json(object);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+//   THE MAINTENANCE LEDGER (DIGITAL VALET)
+// ==========================================
+const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Denim": 10, "Knitwear": 4, "Dress Shirt": 2, "T-Shirt": 1, "Default": 3 };
+
+app.post("/api/ledger/increment", async (req, res, next) => {
+  try {
+    const { itemId } = req.body;
+    if (!itemId) return res.status(400).json({ error: "itemId is required" });
+
+    const { data: item, error: fetchError } = await req.supabase
+      .from("my_closet")
+      .select("category, wear_count, total_wears, wear_threshold, price") 
+      .eq("id", itemId)
+      .single();
+
+    if (fetchError || !item) return res.status(404).json({ error: "Item not found or access denied." });
+
+    const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
+    const newWearCount = (item.wear_count || 0) + 1;
+    const newTotalWears = (item.total_wears || 0) + 1;
+    const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
+    const currentPrice = item.price || 0;
+    const newCpw = currentPrice > 0 ? parseFloat((currentPrice / newTotalWears).toFixed(2)) : null;
+
+    const { data: updatedItem, error: updateError } = await req.supabase
+      .from("my_closet")
+      .update({ wear_count: newWearCount, total_wears: newTotalWears, status: newStatus, cost_per_wear: newCpw })
+      .eq("id", itemId)
+      .select()
+      .single();
+
+    if (updateError) throw new Error(updateError.message);
+    res.json({ success: true, item: updatedItem });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ledger/nightstand-log", async (req, res, next) => {
+  try {
+    const { itemIds } = req.body;
+    for (const id of itemIds) {
+        const { data: item } = await req.supabase.from("my_closet").select("*").eq("id", id).single();
+        if (!item) continue;
+        const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
+        const newWearCount = (item.wear_count || 0) + 1;
+        const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
+        await req.supabase.from("my_closet").update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus }).eq("id", id);
+    }
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/ledger/reset", async (req, res, next) => {
+  try {
+    const { itemIds } = req.body;
+    await req.supabase.from("my_closet").update({ wear_count: 0, status: 'CLEAN' }).in('id', itemIds);
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+// ==========================================
+//   CORE AI STYLING ENGINE (CHAT)
+// ==========================================
+app.post("/api/chat", async (req, res, next) => {
+  const reqId = crypto.randomUUID();
+  console.log(`[${reqId}] Incoming ${req.body.mode} request from User: ${req.user.id}`);
+
+  try {
+    const data = RequestSchema.parse(req.body);
+    const vaultPlaceholder = "https://dummyimage.com/600x400/020617/c5a059.png&text=Wardrobe+Curated+Outfit";
+
+    const { error: initialDbError } = await req.supabase
+      .from("wardrobe_analyses")
+      .insert([{
+        id: reqId, user_id: req.user.id, mode: data.mode, occasion: data.occasion || null,
+        mood: data.mood || null, notes: data.notes || null, image_url: data.image ? "pending_upload" : vaultPlaceholder
+      }]);
+
+    if (initialDbError) throw new Error(`Failed to init record: ${initialDbError.message}`);
+
+    const safeImage = cleanBase64(data.image);
+
+    // Run image upload entirely in the background so it doesn't block the AI generation
+    if (safeImage) {
+      const imageBuffer = Buffer.from(safeImage, "base64");
+      const fileName = `${req.user.id}/${reqId}.jpg`; 
+      req.supabase.storage.from("wardrobe_images").upload(fileName, imageBuffer, { contentType: "image/jpeg", upsert: false })
+        .then(async ({ error: uploadError }) => {
+          if (!uploadError) {
+             const { data: { publicUrl } } = req.supabase.storage.from("wardrobe_images").getPublicUrl(fileName);
+             await req.supabase.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
+          }
+        }).catch(err => console.error(`[${reqId}] Image upload failed:`, err.message));
+    }
+
+    let vaultContext = "No wardrobe items available.";
+    
+    // UPDATED: Added "match_vibe" to the list of modes that inject the user's closet
+    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
+        const { data: vaultItems } = await req.supabase
+            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
+            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
+        if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+    } 
+
+    let dynamicJSONSchema = "";
+    if (data.mode === 'fit') {
+      dynamicJSONSchema = `{
+        "score": <calculate a number between 0 and 100 representing overall fit/proportion>,
+        "tier": "<assign tier based on the classification scale above>",
+        "verdict": "<A brief summary of how the current silhouette and proportions look>",
+        "archetype": "<assign an archetype: e.g., The Executive, The Classicist>",
+        "fit_anatomy": {
+          "shoulders_and_chest": ["<Analyze shoulder seam placement, lapel bowing, or chest pulling>", "<Additional chest note>"],
+          "waist_and_torso": ["<Analyze waist suppression, shirt billowing, or jacket button tension>", "<Additional torso note>"],
+          "legs_and_hem": ["<Analyze trouser break (e.g. full/half/none), drape, and taper>", "<Additional leg note>"]
+        },
+        "alteration_blueprint": ["<Specific tailor instruction 1, e.g., 'Take in waist 1.5 inches'>", "<Specific tailor instruction 2>"],
+        "missing_pieces": ["<A piece that would improve this silhouette>"]
+      }`;
+    } else {
+      dynamicJSONSchema = `{
+        "score": <calculate a number between 0 and 100>,
+        "tier": "<assign tier based on the classification scale above>",
+        "verdict": "<A brief summary of the look.>",
+        "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
+        "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
+        "styling_notes": ["<Note 1>", "<Note 2>"],
+        "outfit_combinations": [
+          { "name": "<Look Name>", "reasoning": "<Why this works>", "item_ids": ["<exact_id_from_vault>"] }
+        ],
+        "what_works": ["<Strength 1>"],
+        "recommendations": ["<Upgrade 1>"],
+        "missing_pieces": ["<Gap 1>"],
+        "acquisition_list": [
+          { "item": "<Item Name>", "priority": "<High/Medium/Low>", "reasoning": "<Why>" }
+        ]
+      }`;
+    }
+
+   // UPDATED: Dynamic directive specific to the new feature with strict ID enforcement
+    let modeSpecificInstructions = "";
+    if (data.mode === 'match_vibe') {
+        modeSpecificInstructions = `
+    MATCH MY VIBE DIRECTIVE: The provided image is the user's partner. Do NOT critique the partner's fit. 
+    1. Extract the partner's color palette, formality level, and core aesthetic. 
+    2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe' JSON provided. 
+    3. CRITICAL IMAGE RENDERING RULE: For EVERY item you select for the user, you MUST copy its exact string "id" from the JSON and place it into the "item_ids" array in your output. If you fail to include the exact IDs, the app will break and the images will not load. Do not invent items.
+    4. Detail the color matching theory used (e.g., complementary, analogous) in your 'reasoning'.`;
+    }
+
+    const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
+    Mode: ${data.mode}
+    Occasion: ${data.occasion || 'General'}
+    Client Preferences: ${data.fitPreference || 'Tailored'}, Contrast: ${data.contrast || 'Medium'}
+    Climate Context: ${data.climate || 'Unknown'}
+    Measurements: ${JSON.stringify(data.measurements || {})}
+    Available Wardrobe (JSON): ${vaultContext}
+    ${modeSpecificInstructions}
+    
+    CRITICAL DIRECTIVES:
+    1. Ignore any human features in the photo. Focus entirely on the clothing and geometry. 
+    2. YOU MUST CALCULATE REAL SCORES based on the garments. DO NOT USE PLACEHOLDER NUMBERS.
+    3. TIER CLASSIFICATION SYSTEM: You must strictly assign the "tier" based on your final calculated "score" using this exact scale:
+       - 0 to 59 = "Baseline"
+       - 60 to 69 = "Functional"
+       - 70 to 79 = "Intentional"
+       - 80 to 89 = "Refined"
+       - 90 to 100 = "Elite"
+    
+    YOUR OUTPUT MUST BE STRICTLY VALID JSON. DO NOT WRAP IN MARKDOWN. You must perfectly match this exact structure:
+    ${dynamicJSONSchema}`;
+
+    const messages = [{ role: "system", content: systemPrompt }];
+    
+    if (safeImage) {
+        const aiBuffer = Buffer.from(safeImage, "base64");
+        messages.push({
+            role: "user",
+            content: [
+                { type: "text", text: `Analyze this image. Notes: ${data.notes || 'None'}.` },
+                { type: "image", image: aiBuffer } 
+            ]
+        });
+    } else {
+        messages.push({ role: "user", content: `Please execute styling core. Notes: ${data.notes || 'No notes'}` });
+    }
+
+    // Wrap the stream in a try/catch to prevent orphaned requests if OpenAI drops the connection
+    let fullResponse = "";
+    try {
+        const result = await streamText({ 
+            model: aiSdkOpenAi("gpt-4o"), 
+            messages: messages, 
+            temperature: 0.3 
+        });
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Transfer-Encoding', 'chunked');
+
+        for await (const chunk of result.textStream) {
+            fullResponse += chunk;
+            res.write(chunk);
+        }
+        res.end();
+    } catch (streamError) {
+        console.error(`[${reqId}] OpenAI Stream Failure:`, streamError.message);
+        if (!res.headersSent) {
+            return res.status(502).json({ error: "AI Engine connection dropped. Please try again." });
+        } else {
+            res.end(); // Safely terminate the broken stream
+            return;
+        }
+    }
+
+    // Aggressively clean the markdown formatting just in case the AI wraps it in ```json 
+    try {
+        let cleanJson = fullResponse.trim();
+        if (cleanJson.startsWith('```')) {
+            cleanJson = cleanJson.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        }
+        
+        const parsedJson = JSON.parse(cleanJson);
+        await req.supabase.from("wardrobe_analyses").update({ 
+            full_analysis: parsedJson, 
+            score: parsedJson.score || null, 
+            tier: parsedJson.tier || null, 
+            verdict: parsedJson.verdict || "Analysis Complete"
+        }).eq("id", reqId);
+    } catch (e) {
+        console.error(`[${reqId}] Failed to parse/save final JSON state. Bad AI formatting.`, e.message);
+    }
+
+  } catch (err) { 
+      // Only pass to global error handler if headers haven't been sent yet
+      if (!res.headersSent) next(err); 
+      else console.error("Post-stream error:", err.message);
+  }
+});
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-    console.error(`[Global Error] ${req.method} ${req.url}:`, err.message);
-    if (!res.headersSent) {
-        res.status(500).json({ error: "The atelier engine encountered a critical error." });
-    }
+  console.error(`[Global Error] ${req.method} ${req.url}:`, err.message);
+  if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid request payload" });
+  res.status(500).json({ error: "An internal server error occurred." });
 });
 
 const PORT = process.env.PORT || 8080;
-const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 ELEVATE ENGINE ONLINE: PORT ${PORT}.`);
+const server = app.listen(PORT, "0.0.0.0", () => { 
+    console.log(`🚀 ELEVATE ENGINE ONLINE: PORT ${PORT}.`); 
 });
-
-server.keepAliveTimeout = 120000;
+server.keepAliveTimeout = 120000; 
 server.headersTimeout = 125000;
