@@ -1133,32 +1133,47 @@ function generateHTMLFromData(data, displayMode) {
     if (Array.isArray(data.outfit_combinations) && data.outfit_combinations.length > 0) {
       
       if (multiDayModes.includes(displayMode)) {
-        // FULL-WIDTH STACKED LAYOUT FOR TRIPS AND WEEKS
+        // FULL-WIDTH STACKED FEED FOR MULTI-DAY PLANS
         let label = 'Curated Itinerary';
-        if (displayMode === 'office_curation') label = 'Weekly Office Rotation';
+        if (displayMode === 'office_curation') label = 'Weekly Office Rotation (5 Days)';
         if (displayMode === 'travel_curator') label = 'Vacation Capsule';
         if (displayMode === 'work_trip_curator') label = 'Business Trip Capsule';
 
         html += `<div class="label" style="margin-top:30px; margin-bottom:16px;">${escapeHtml(label)}</div>`;
 
+        // This loop ensures every single day provided by the AI (1 through 5+) is rendered
         data.outfit_combinations.forEach((outfit, index) => {
           const { validUrls, validIds } = resolveOutfitImages(outfit);
-          html += `<div class="card" style="margin-top:0; margin-bottom:20px; border-left:2px solid var(--accent-gold);">`;
-          html += `<div style="color:var(--text-main); font-size:14px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Day ${index + 1}: ${escapeHtml(outfit.name || 'Look')}</div>`;
-          html += `<div style="color:#D1D5DB; font-size:12px; margin-bottom:16px; line-height:1.6; font-weight:300;">${escapeHtml(outfit.reasoning || '')}</div>`;
-
-          if (validUrls.length > 0) {
-            html += `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; margin-bottom:16px;">`;
-            validUrls.forEach((url) => {
-              html += `<img src="${escapeHtml(url)}" loading="lazy" style="width:100%; height:160px; object-fit:cover; border-radius:6px; border:1px solid rgba(255,255,255,0.05);" alt="Outfit item">`;
-            });
-            html += `</div>`;
-          }
           
-          if (validIds.length > 0) {
-            html += `<button class="action-btn js-log-nightstand" data-item-ids="${escapeHtml(JSON.stringify(validIds))}" style="margin-top:0;">Log This Wear</button>`;
-          }
-          html += `</div>`;
+          html += `
+            <div class="card" style="margin-top:0; margin-bottom:32px; border-left:2px solid var(--accent-gold); padding: 30px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="color:var(--text-main); font-size:16px; font-weight:700; text-transform:uppercase; letter-spacing:2px;">
+                  Day ${index + 1}: ${escapeHtml(outfit.name || 'Ensemble')}
+                </div>
+              </div>
+              
+              <div style="color:#D1D5DB; font-size:13px; margin-bottom:20px; line-height:1.6; font-weight:300;">
+                ${escapeHtml(outfit.reasoning || 'No reasoning provided.')}
+              </div>
+
+              ${validUrls.length > 0 ? `
+                <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:20px;">
+                  ${validUrls.map(url => `
+                    <div style="background:rgba(255,255,255,0.02); border-radius:8px; border:1px solid rgba(255,255,255,0.05); overflow:hidden; aspect-ratio:3/4;">
+                      <img src="${escapeHtml(url)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" alt="Garment">
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+              
+              <button class="action-btn js-log-nightstand" 
+                      data-item-ids="${escapeHtml(JSON.stringify(validIds))}" 
+                      style="margin-top:10px; width:100%; border-color:rgba(212, 175, 55, 0.3); letter-spacing:2px;">
+                Log Day ${index + 1} Wear
+              </button>
+            </div>
+          `;
         });
         
       } else {

@@ -108,12 +108,11 @@ const RequestSchema = z.object({
     climate: z.string().optional(),
     mood: z.string().optional(),
     measurements: z.record(z.any()).optional(),
-    userPreferences: z.record(z.any()).optional(), // Added Preferences Context
+    userPreferences: z.record(z.any()).optional(), 
     stressTest: z.boolean().optional(),
     edgeCaseMode: z.boolean().optional()
 });
 
-// Input Validation for User Profiles (Updated to include preferences)
 const ProfileUpdateSchema = z.object({
     measurements: z.record(z.any()).optional(),
     silhouette_id: z.string().nullable().optional(),
@@ -121,15 +120,15 @@ const ProfileUpdateSchema = z.object({
 });
 
 // ==========================================
-//   USER PROFILE & MEASUREMENTS (MASTER'S LEDGER)
+//   USER PROFILE & MEASUREMENTS
 // ==========================================
 
 app.get("/api/user/profile", async (req, res, next) => {
   try {
     const { data, error } = await req.supabase
-      .from("profiles") // UPDATED: Correct table name
+      .from("profiles") 
       .select("measurements, silhouette_id, preferences")
-      .eq("id", req.user.id) // UPDATED: Correct column name
+      .eq("id", req.user.id) 
       .single();
 
     if (error && error.code !== 'PGRST116') {
@@ -147,14 +146,14 @@ app.post("/api/user/profile", async (req, res, next) => {
     const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
     const { data, error } = await req.supabase
-      .from("profiles") // UPDATED: Correct table name
+      .from("profiles") 
       .upsert({
-        id: req.user.id, // UPDATED: Correct column name
+        id: req.user.id, 
         ...(measurements && { measurements }),
         ...(silhouette_id !== undefined && { silhouette_id }),
         ...(preferences && { preferences }),
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id' }) // UPDATED: Correct conflict column
+      }, { onConflict: 'id' }) 
       .select()
       .single();
 
@@ -309,7 +308,6 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
         
     if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
 
-    // AI Preference Injection
     let prefsContext = "";
     if (userPreferences && (userPreferences.fits?.length || userPreferences.brands?.length || userPreferences.additional?.length)) {
         prefsContext = `
@@ -541,6 +539,7 @@ app.post("/api/chat", async (req, res, next) => {
       }`;
     }
 
+    // --- AI MULTI-DAY & MODE DIRECTIVE FIX ---
     let modeSpecificInstructions = "";
     if (data.mode === 'match_vibe') {
         modeSpecificInstructions = `
@@ -549,6 +548,12 @@ app.post("/api/chat", async (req, res, next) => {
     2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe' JSON provided. 
     3. CRITICAL IMAGE RENDERING RULE: For EVERY item you select for the user, you MUST copy its exact string "id" from the JSON and place it into the "item_ids" array in your output. If you fail to include the exact IDs, the app will break and the images will not load. Do not invent items.
     4. Detail the color matching theory used (e.g., complementary, analogous) in your 'reasoning'.`;
+    } else if (data.mode === 'office_curation') {
+        modeSpecificInstructions = `
+    OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Each object should be named "Day 1", "Day 2", etc.`;
+    } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
+        modeSpecificInstructions = `
+    TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.`;
     }
 
     // --- AI PREFERENCE INJECTION ---
