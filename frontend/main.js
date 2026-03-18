@@ -54,8 +54,8 @@ const STATE = {
   currentGarmentFile: null,
   profileListenersBound: false,
   initialized: false,
-  // --- ADDED PREFERENCES STATE ---
-  userPreferences: { fits: [], brands: [], additional: [] }
+  userPreferences: { fits: [], brands: [], additional: [] },
+  activeVaultFilter: null // --- ADDED FILTER STATE ---
 };
 
 const CONSTANTS = {
@@ -184,8 +184,6 @@ function cacheDom() {
     mInseam: $('m_inseam'),
     mWaist: $('m_waist'),
     mHeight: $('m_height'),
-    
-    // --- PREFERENCE MODAL ELEMENTS ---
     preferencesModal: $('preferencesModal'),
     savePreferencesBtn: $('savePreferencesBtn'),
     prefSaveStatus: $('prefSaveStatus'),
@@ -387,25 +385,21 @@ function resetVaultUploadUi() {
   STATE.parsedCareTagData = null;
 }
 
-// --- FULLY INTEGRATED SYNC LOGIC (Measurements + Preferences) ---
 async function syncUserProfile() {
   try {
     const res = await apiFetch('/api/user/profile');
     const { profile } = await res.json();
     
     if (profile) {
-        // 1. Hydrate Ledger / Measurements
         const m = profile.measurements || {};
         DOM.mChest.value = m.chest || '';
         DOM.mInseam.value = m.inseam || '';
         DOM.mWaist.value = m.waist || '';
         DOM.mHeight.value = m.height || '';
 
-        // 2. Hydrate Preferences (Style DNA)
         if (profile.preferences) {
             STATE.userPreferences = profile.preferences;
             
-            // Hydrate specific UI Chips
             document.querySelectorAll('.chip').forEach(chip => {
                 const val = chip.getAttribute('data-val');
                 if (STATE.userPreferences.fits?.includes(val) || STATE.userPreferences.brands?.includes(val)) {
@@ -413,8 +407,7 @@ async function syncUserProfile() {
                 }
             });
 
-            // Hydrate custom tag pills
-            document.querySelectorAll('.tag-pill').forEach(p => p.remove()); // Clear existing
+            document.querySelectorAll('.tag-pill').forEach(p => p.remove()); 
             if (STATE.userPreferences.additional) {
                 STATE.userPreferences.additional.forEach(tag => {
                     const pill = document.createElement('div');
@@ -429,7 +422,6 @@ async function syncUserProfile() {
     console.warn('Failed to load profile/preferences:', err.message);
   }
 
-  // Bind measurement autosave listener exactly once
   if (STATE.profileListenersBound) return;
 
   const persistMeasurements = async () => {
@@ -457,7 +449,6 @@ async function syncUserProfile() {
   STATE.profileListenersBound = true;
 }
 
-// --- SAVE PREFERENCES ACTION ---
 async function handleSavePreferences() {
   DOM.savePreferencesBtn.innerText = "Saving...";
   DOM.savePreferencesBtn.disabled = true;
@@ -465,13 +456,11 @@ async function handleSavePreferences() {
   STATE.userPreferences.fits = Array.from(document.querySelectorAll('#fitChips .chip.active')).map(el => el.getAttribute('data-val'));
   STATE.userPreferences.brands = Array.from(document.querySelectorAll('#brandChips .chip.active')).map(el => el.getAttribute('data-val'));
   
-  // Clean '✕' character out of tag text if grabbed directly from textContent
   STATE.userPreferences.additional = Array.from(document.querySelectorAll('.tag-pill')).map(el => {
       let text = el.textContent || "";
       return text.replace('✕', '').trim();
   });
 
-  // Grab any pending typed text that hasn't been entered yet
   const pendingInput = DOM.customPrefInput?.value?.trim();
   if (pendingInput && pendingInput !== "") {
       STATE.userPreferences.additional.push(pendingInput);
@@ -490,7 +479,7 @@ async function handleSavePreferences() {
     setTimeout(() => {
         setVisible(DOM.prefSaveStatus, false);
         DOM.preferencesModal.classList.remove('active');
-        syncUserProfile(); // Refresh UI to show newly saved pending tag
+        syncUserProfile(); 
     }, 2000);
     
   } catch (error) {
@@ -567,16 +556,24 @@ function renderVaultDashboard(items) {
   const counts = getVaultCounts(items);
   const total = items.length;
 
-  const createStatBar = (label, count) => {
+  const createStatBar = (label, count, category, isFullWidth = false) => {
     const percentage = total > 0 ? (count / total) * 100 : 0;
-    return `<div class="breakdown-item"><div class="breakdown-header"><span>${escapeHtml(label)}</span><span class="breakdown-score">${count}</span></div><div class="bar"><div class="bar-fill" style="width:${percentage}%"></div></div></div>`;
+    const isActive = STATE.activeVaultFilter === category;
+    const borderStyle = isActive ? 'border: 1px solid var(--accent-gold); background: rgba(212, 175, 55, 0.08);' : 'border: 1px solid var(--glass-border);';
+    const gridSpan = isFullWidth ? 'grid-column: 1 / -1;' : '';
+    
+    return `<div class="breakdown-item filter-btn" data-filter-category="${category}" style="cursor:pointer; transition:0.3s; ${borderStyle} ${gridSpan}">
+              <div class="breakdown-header"><span style="color:${isActive ? 'var(--accent-gold)' : 'var(--text-muted)'}">${escapeHtml(label)}</span><span class="breakdown-score">${count}</span></div>
+              <div class="bar"><div class="bar-fill" style="width:${percentage}%"></div></div>
+            </div>`;
   };
 
   DOM.analyticsGrid.innerHTML = [
-    createStatBar('Tops', counts.Top),
-    createStatBar('Bottoms', counts.Bottom),
-    createStatBar('Outerwear', counts.Outerwear),
-    createStatBar('Footwear', counts.Footwear),
+    createStatBar('Tops', counts.Top, 'Top'),
+    createStatBar('Bottoms', counts.Bottom, 'Bottom'),
+    createStatBar('Outerwear', counts.Outerwear, 'Outerwear'),
+    createStatBar('Footwear', counts.Footwear, 'Footwear'),
+    createStatBar('Accessories', counts.Accessory, 'Accessory', true), 
   ].join('');
   DOM.vaultDashboard.style.display = 'block';
 }
@@ -590,6 +587,61 @@ function updateValetButton(items = STATE.cachedVaultInventory) {
     DOM.valetBtn.innerHTML = '⚑ The Wardrobe Concierge (All Items Clean)';
     DOM.valetBtn.style.borderColor = 'var(--accent-blue)';
   }
+}
+
+// --- UPDATED RENDER FEED TO HANDLE ACTIVE FILTER ---
+function renderVaultItems() {
+  DOM.vaultFeed.innerHTML = '';
+  
+  const filteredItems = STATE.activeVaultFilter 
+    ? STATE.cachedVaultInventory.filter(item => item.category === STATE.activeVaultFilter)
+    : STATE.cachedVaultInventory;
+
+  if (filteredItems.length === 0) {
+    let msg = STATE.activeVaultFilter ? `No ${escapeHtml(STATE.activeVaultFilter)}s found in your wardrobe.` : 'Your wardrobe is currently empty. Start uploading garments.';
+    DOM.vaultFeed.innerHTML = `<p style="text-align:center; color:var(--text-muted); font-size:12px; grid-column:span 2;">${msg}</p>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  filteredItems.forEach((item) => {
+    const wearCount = item.wear_count || 0;
+    const limit = item.wear_threshold || CONSTANTS.wearThresholds[item.category] || CONSTANTS.wearThresholds.Default;
+    let statusClass = 'status-clean';
+    let bannerHtml = '';
+
+    if (item.status === 'NEEDS_CARE' || wearCount >= limit) {
+      statusClass = 'status-care';
+      bannerHtml = '<div style="position:absolute; bottom:40px; left:0; width:100%; background:rgba(239, 68, 68, 0.9); color:white; font-size:9px; font-weight:bold; text-align:center; padding:4px 0; letter-spacing:1px; z-index:5;">NEEDS CARE</div>';
+    } else if (wearCount >= limit - 1 && limit > 1) {
+      statusClass = 'status-worn';
+    }
+
+    const div = document.createElement('div');
+    div.className = 'vault-item';
+    div.id = `vault-${item.id}`;
+    div.addEventListener('click', (event) => {
+      if (event.target instanceof HTMLElement && event.target.tagName !== 'BUTTON') openVaultItemDetail(item.id);
+    });
+    div.addEventListener('dblclick', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await logWearQuick(item.id);
+    });
+
+    div.innerHTML = `
+      <div class="status-dot ${statusClass}" title="Wear Count: ${wearCount}/${limit}"></div>
+      <button class="delete-btn" data-delete-vault-id="${escapeHtml(item.id)}" style="position:absolute; top:15px; right:15px; background:rgba(0,0,0,0.5); border-radius:50%; width:20px; height:20px; line-height:18px; text-align:center; z-index:10;">✕</button>
+      <img src="${escapeHtml(item.image_url)}" loading="lazy" style="pointer-events:none;" alt="${escapeHtml(item.category)}">
+      ${bannerHtml}
+      <div class="vault-meta">${escapeHtml(item.category)}</div>
+      <div class="vault-notes">${escapeHtml(item.notes || 'No description')}</div>
+    `;
+    fragment.appendChild(div);
+  });
+
+  DOM.vaultFeed.appendChild(fragment);
 }
 
 async function fetchVaultInventory(backgroundOnly = false) {
@@ -615,52 +667,9 @@ async function fetchVaultInventory(backgroundOnly = false) {
     if (backgroundOnly) return;
 
     setVisible(DOM.vaultLoader, false);
-
-    if (STATE.cachedVaultInventory.length === 0) {
-      DOM.vaultFeed.innerHTML = '<p style="text-align:center; color:var(--text-muted); font-size:12px; grid-column:span 2;">Your wardrobe is currently empty. Start uploading garments.</p>';
-      return;
-    }
-
     renderVaultDashboard(STATE.cachedVaultInventory);
-    const fragment = document.createDocumentFragment();
-
-    STATE.cachedVaultInventory.forEach((item) => {
-      const wearCount = item.wear_count || 0;
-      const limit = item.wear_threshold || CONSTANTS.wearThresholds[item.category] || CONSTANTS.wearThresholds.Default;
-      let statusClass = 'status-clean';
-      let bannerHtml = '';
-
-      if (item.status === 'NEEDS_CARE' || wearCount >= limit) {
-        statusClass = 'status-care';
-        bannerHtml = '<div style="position:absolute; bottom:40px; left:0; width:100%; background:rgba(239, 68, 68, 0.9); color:white; font-size:9px; font-weight:bold; text-align:center; padding:4px 0; letter-spacing:1px; z-index:5;">NEEDS CARE</div>';
-      } else if (wearCount >= limit - 1 && limit > 1) {
-        statusClass = 'status-worn';
-      }
-
-      const div = document.createElement('div');
-      div.className = 'vault-item';
-      div.id = `vault-${item.id}`;
-      div.addEventListener('click', (event) => {
-        if (event.target instanceof HTMLElement && event.target.tagName !== 'BUTTON') openVaultItemDetail(item.id);
-      });
-      div.addEventListener('dblclick', async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        await logWearQuick(item.id);
-      });
-
-      div.innerHTML = `
-        <div class="status-dot ${statusClass}" title="Wear Count: ${wearCount}/${limit}"></div>
-        <button class="delete-btn" data-delete-vault-id="${escapeHtml(item.id)}" style="position:absolute; top:15px; right:15px; background:rgba(0,0,0,0.5); border-radius:50%; width:20px; height:20px; line-height:18px; text-align:center; z-index:10;">✕</button>
-        <img src="${escapeHtml(item.image_url)}" loading="lazy" style="pointer-events:none;" alt="${escapeHtml(item.category)}">
-        ${bannerHtml}
-        <div class="vault-meta">${escapeHtml(item.category)}</div>
-        <div class="vault-notes">${escapeHtml(item.notes || 'No description')}</div>
-      `;
-      fragment.appendChild(div);
-    });
-
-    DOM.vaultFeed.appendChild(fragment);
+    renderVaultItems(); // Initial un-filtered load
+    
   } catch (error) {
     if (!backgroundOnly) {
       setVisible(DOM.vaultLoader, false);
@@ -1105,7 +1114,6 @@ function resolveOutfitImages(outfitObj) {
   return { validUrls, validIds };
 }
 
-// --- UPDATED HTML GENERATOR FOR VERTICAL FULL-WIDTH MULTI-DAY CARDS ---
 function generateHTMLFromData(data, displayMode) {
   let html = '';
   let score = data.score ?? 0;
@@ -1141,7 +1149,6 @@ function generateHTMLFromData(data, displayMode) {
     if (Array.isArray(data.outfit_combinations) && data.outfit_combinations.length > 0) {
       
       if (multiDayModes.includes(displayMode)) {
-        // FULL-WIDTH STACKED FEED FOR MULTI-DAY PLANS
         let label = 'Curated Itinerary';
         if (displayMode === 'office_curation') label = 'Weekly Office Rotation (5 Days)';
         if (displayMode === 'travel_curator') label = 'Vacation Capsule';
@@ -1149,7 +1156,6 @@ function generateHTMLFromData(data, displayMode) {
 
         html += `<div class="label" style="margin-top:30px; margin-bottom:16px;">${escapeHtml(label)}</div>`;
 
-        // This loop ensures every single day provided by the AI (1 through 5+) is rendered
         data.outfit_combinations.forEach((outfit, index) => {
           const { validUrls, validIds } = resolveOutfitImages(outfit);
           
@@ -1185,7 +1191,6 @@ function generateHTMLFromData(data, displayMode) {
         });
         
       } else {
-        // SINGLE DAY LAYOUT
         const label = displayMode === 'morning_briefing' ? 'The Daily Recommendation' :
                       displayMode === 'match_vibe' ? 'Coordinated Outfits' : 'Outfit Combinations';
 
@@ -1968,6 +1973,20 @@ function bindEvents() {
   document.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    // --- VAULT FILTER LOGIC ---
+    const filterBtn = target.closest('.filter-btn');
+    if (filterBtn) {
+        const category = filterBtn.getAttribute('data-filter-category');
+        if (STATE.activeVaultFilter === category) {
+            STATE.activeVaultFilter = null; // Toggle off if clicked again
+        } else {
+            STATE.activeVaultFilter = category;
+        }
+        renderVaultDashboard(STATE.cachedVaultInventory); // Re-render to update gold border
+        renderVaultItems(); // Re-render the visual feed
+        return;
+    }
 
     if (target.id === 'downloadDossierBtn') {
       downloadDossier();

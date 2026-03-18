@@ -559,14 +559,16 @@ app.post("/api/chat", async (req, res, next) => {
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
-    ACQUISITION BOARD DIRECTIVE: You MUST analyze the user's Available Wardrobe and identify EXACTLY 3 distinct items they need to buy to elevate their style. 
+    ACQUISITION BOARD DIRECTIVE: You MUST analyze the user's Available Wardrobe and identify EXACTLY 5 distinct items they need to buy to elevate their style. 
+    - 2 items MUST be assigned "High" priority.
+    - 3 items MUST be assigned "Medium" priority.
     
     CRITICAL ANTI-DUPLICATION RULE: You MUST rigorously cross-reference the Available Wardrobe JSON. DO NOT recommend items they already own. 
     - If they own "Bottoms" in Khaki, Navy, Grey, or Beige, DO NOT recommend chinos, trousers, or pants in those colors. 
     - If they own a specific color/style of jacket, do not recommend it again. 
     Look for ACTUAL gaps in their wardrobe (e.g., missing footwear, missing layering pieces, missing formal wear) and recommend those instead.
     
-    Your 'acquisition_list' array MUST contain EXACTLY 3 complete objects representing their Top 3 smartest shopping priorities.`;
+    Your 'acquisition_list' array MUST contain EXACTLY 5 complete objects representing their Top 5 smartest shopping priorities.`;
     }
 
     let prefsContext = "";
