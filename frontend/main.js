@@ -2016,11 +2016,9 @@ initialize().catch((err) => {
   showCrash(err.message || String(err));
 });
 
-// Optional globals for legacy inline integrations still present in the page.
-window.EleVateApp = {
-  openVaultItemDetail,
-  openValetDashboard,
-  closeGenericModal,
-  openDossierModal,
-  downloadDossier,
-};
+// Expose modal and click functions to the global window for HTML inline access
+window.openVaultItemDetail = openVaultItemDetail;
+window.openValetDashboard = openValetDashboard;
+window.closeGenericModal = closeGenericModal;
+window.openDossierModal = openDossierModal;
+window.downloadDossier = downloadDossier;
