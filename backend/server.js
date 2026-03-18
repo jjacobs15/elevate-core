@@ -499,7 +499,6 @@ app.post("/api/chat", async (req, res, next) => {
 
     let vaultContext = "No wardrobe items available.";
     
-    // UPDATED: 'work_trip_curator' added to the whitelist so the AI can see the closet!
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
@@ -507,7 +506,6 @@ app.post("/api/chat", async (req, res, next) => {
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // UPDATED: Using strictly valid JSON templates to prevent 500 parsing crashes
     let dynamicJSONSchema = "";
     if (data.mode === 'fit') {
       dynamicJSONSchema = `{
@@ -559,6 +557,9 @@ app.post("/api/chat", async (req, res, next) => {
         modeSpecificInstructions = `
     TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
+    } else if (data.mode === 'acquisition_board') {
+        modeSpecificInstructions = `
+    ACQUISITION BOARD DIRECTIVE: You MUST analyze the user's wardrobe and identify EXACTLY 3 distinct items they need to buy to elevate their style. Do not generate 1 item. Do not generate 5 items. Your 'acquisition_list' array MUST contain EXACTLY 3 complete objects representing their Top 3 smartest shopping priorities.`;
     }
 
     let prefsContext = "";
@@ -633,7 +634,6 @@ app.post("/api/chat", async (req, res, next) => {
         }
     }
 
-    // UPDATED: Bulletproof JSON extraction to prevent parsing crashes
     try {
         let cleanJson = fullResponse.trim();
         const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
