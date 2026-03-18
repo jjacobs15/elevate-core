@@ -127,7 +127,7 @@ const ProfileUpdateSchema = z.object({
 app.get("/api/user/profile", async (req, res, next) => {
   try {
     const { data, error } = await req.supabase
-      .from("user_profiles")
+      .from("profiles") // UPDATED FROM user_profiles
       .select("measurements, silhouette_id, preferences")
       .eq("user_id", req.user.id)
       .single();
@@ -147,7 +147,7 @@ app.post("/api/user/profile", async (req, res, next) => {
     const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
     const { data, error } = await req.supabase
-      .from("user_profiles")
+      .from("profiles") // UPDATED FROM user_profiles
       .upsert({
         user_id: req.user.id,
         ...(measurements && { measurements }),
@@ -170,7 +170,6 @@ app.post("/api/user/profile", async (req, res, next) => {
 //   STUDIO POLISH 
 // ==========================================
 app.post("/api/remove-bg", async (req, res, next) => {
-  // ... [Existing remove-bg logic] ...
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "No image provided" });
@@ -203,7 +202,92 @@ app.post("/api/remove-bg", async (req, res, next) => {
 // ==========================================
 //   AUTO-TAGGING & CARE TAG
 // ==========================================
-// ... [Your existing /api/wardrobe/auto-tag and /api/ledger/analyze-care-tag routes remain unchanged] ...
+app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Image required for tagging" });
+
+    const safeImage = cleanBase64(image);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    const TaggingSchema = z.object({
+      primary_color: z.string().describe("The dominant color"),
+      secondary_color: z.string().nullable().describe("The accent color, or null"),
+      pattern: z.string(),
+      seasonality: z.enum(["Summer", "Winter", "All-Season", "Fall/Spring"]),
+      fabric_weight_category: z.enum(["Heavyweight", "Midweight", "Lightweight", "Tropical"]),
+      drape_index: z.number().min(1).max(10).describe("1 = Stiff/Structured, 10 = Flowing/Unstructured"),
+      estimated_lifespan_wears: z.number().describe("Estimated wears before needing replacement")
+    });
+
+    try {
+        const { object } = await generateObject({
+          model: aiSdkOpenAi("gpt-4o-mini"),
+          schema: TaggingSchema,
+          messages: [
+            { 
+              role: "user", 
+              content: [
+                { type: "text", text: "Analyze this garment. Identify its visual properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
+                { type: "image", image: imageBuffer } 
+              ] 
+            }
+          ],
+          temperature: 0.1,
+        });
+        res.json({ success: true, tags: object });
+    } catch (aiError) {
+        console.warn("[Auto-Tag Warning] Returning default tags:", aiError.message);
+        res.json({ success: true, tags: {
+            primary_color: "Unknown", secondary_color: null, pattern: "Solid",
+            seasonality: "All-Season", fabric_weight_category: "Midweight",
+            drape_index: 5, estimated_lifespan_wears: 100
+        }});
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Image required" });
+
+    const safeImage = cleanBase64(image);
+    const imageBuffer = Buffer.from(safeImage, "base64");
+
+    const CareTagSchema = z.object({
+      careProfile: z.object({
+        instructions: z.array(z.string()).describe("List of care instructions found on tag"),
+        is_machine_washable: z.boolean().describe("True if machine washing is allowed")
+      })
+    });
+
+    try {
+        const { object } = await generateObject({
+          model: aiSdkOpenAi("gpt-4o-mini"),
+          schema: CareTagSchema,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Read this clothing care tag. Extract washing and drying instructions." },
+                { type: "image", image: imageBuffer }
+              ]
+            }
+          ],
+          temperature: 0.1,
+        });
+        res.json(object);
+    } catch (aiError) {
+        console.warn("[Care Tag Warning] Returning defaults:", aiError.message);
+        res.json({ careProfile: { instructions: ["Read physical tag"], is_machine_washable: true } });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ==========================================
 //   GHOST SIMULATION (ANCHOR PIECE CURATOR)
@@ -274,7 +358,110 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 // ==========================================
 //   CHRONOS & VALET 
 // ==========================================
-// ... [Your existing /api/analytics/chronos and /api/ledger/* routes remain unchanged] ...
+app.get("/api/analytics/chronos", async (req, res, next) => {
+  try {
+    const { data: dossiers, error } = await req.supabase
+      .from("wardrobe_analyses")
+      .select("score, verdict, created_at")
+      .not("score", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (error) throw new Error(error.message);
+    
+    if (!dossiers || dossiers.length < 2) {
+      return res.json({ message: "Not enough data yet. Run at least 2 Stylist evaluations to unlock Chronos." });
+    }
+
+    const ChronosSchema = z.object({
+      chronos: z.object({
+        trajectory: z.enum(["Improving", "Stagnant", "Declining"]),
+        average_score_shift: z.string().describe("e.g., '+5 points' or '-2 points'"),
+        aesthetic_drift: z.string().describe("A 2-sentence analysis of how their style is evolving based on recent verdicts."),
+        course_correction: z.string().describe("1 actionable piece of advice to improve their next look.")
+      })
+    });
+
+    const { object } = await generateObject({
+      model: aiSdkOpenAi("gpt-4o"),
+      schema: ChronosSchema,
+      messages: [
+        {
+          role: "system",
+          content: `You are EleVate's Chronos AI. Analyze this user's recent outfit scores and verdicts to determine their style evolution: ${JSON.stringify(dossiers)}`
+        },
+        {
+          role: "user",
+          content: "Generate the Chronos Aesthetic Heatmap analysis based on my history."
+        }
+      ],
+      temperature: 0.3,
+    });
+
+    res.json(object);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Denim": 10, "Knitwear": 4, "Dress Shirt": 2, "T-Shirt": 1, "Default": 3 };
+
+app.post("/api/ledger/increment", async (req, res, next) => {
+  try {
+    const { itemId } = req.body;
+    if (!itemId) return res.status(400).json({ error: "itemId is required" });
+
+    const { data: item, error: fetchError } = await req.supabase
+      .from("my_closet")
+      .select("category, wear_count, total_wears, wear_threshold, price") 
+      .eq("id", itemId)
+      .single();
+
+    if (fetchError || !item) return res.status(404).json({ error: "Item not found or access denied." });
+
+    const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
+    const newWearCount = (item.wear_count || 0) + 1;
+    const newTotalWears = (item.total_wears || 0) + 1;
+    const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
+    const currentPrice = item.price || 0;
+    const newCpw = currentPrice > 0 ? parseFloat((currentPrice / newTotalWears).toFixed(2)) : null;
+
+    const { data: updatedItem, error: updateError } = await req.supabase
+      .from("my_closet")
+      .update({ wear_count: newWearCount, total_wears: newTotalWears, status: newStatus, cost_per_wear: newCpw })
+      .eq("id", itemId)
+      .select()
+      .single();
+
+    if (updateError) throw new Error(updateError.message);
+    res.json({ success: true, item: updatedItem });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ledger/nightstand-log", async (req, res, next) => {
+  try {
+    const { itemIds } = req.body;
+    for (const id of itemIds) {
+        const { data: item } = await req.supabase.from("my_closet").select("*").eq("id", id).single();
+        if (!item) continue;
+        const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
+        const newWearCount = (item.wear_count || 0) + 1;
+        const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
+        await req.supabase.from("my_closet").update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus }).eq("id", id);
+    }
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/ledger/reset", async (req, res, next) => {
+  try {
+    const { itemIds } = req.body;
+    await req.supabase.from("my_closet").update({ wear_count: 0, status: 'CLEAN' }).in('id', itemIds);
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
 
 // ==========================================
 //   CORE AI STYLING ENGINE (CHAT)

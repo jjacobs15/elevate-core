@@ -7,6 +7,7 @@
 // - Adds config validation and guarded initialization
 // - Keeps the single-file structure for easier drop-in replacement
 // - Added "Match My Vibe" (match_vibe) integration
+// - INTEGRATED STYLE DNA (Global User Preferences) via unified /api/user/profile
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -53,6 +54,8 @@ const STATE = {
   currentGarmentFile: null,
   profileListenersBound: false,
   initialized: false,
+  // --- ADDED PREFERENCES STATE ---
+  userPreferences: { fits: [], brands: [], additional: [] }
 };
 
 const CONSTANTS = {
@@ -112,7 +115,7 @@ function cacheDom() {
     categoryEl: $('category'),
     occasionEl: $('occasion'),
     customOccasionEl: $('customOccasion'),
-    fitPreferenceEl: $('fitPreference'),
+    fitPreferenceEl: $('fitPreference', false), // Optional now that it's globally handled
     previewImg: $('imagePreview'),
     imageFrame: $('imageFrame'),
     tailorInstructions: $('tailorInstructions'),
@@ -181,6 +184,13 @@ function cacheDom() {
     mInseam: $('m_inseam'),
     mWaist: $('m_waist'),
     mHeight: $('m_height'),
+    
+    // --- PREFERENCE MODAL ELEMENTS ---
+    preferencesModal: $('preferencesModal'),
+    savePreferencesBtn: $('savePreferencesBtn'),
+    prefSaveStatus: $('prefSaveStatus'),
+    customPrefInput: $('customPrefInput'),
+    tagWrapper: $('tagWrapper')
   });
 }
 
@@ -377,56 +387,110 @@ function resetVaultUploadUi() {
   STATE.parsedCareTagData = null;
 }
 
+// --- FULLY INTEGRATED SYNC LOGIC (Measurements + Preferences) ---
 async function syncUserProfile() {
-  const user = await getCurrentUser();
-  if (!user) return;
+  try {
+    const res = await apiFetch('/api/user/profile');
+    const { profile } = await res.json();
+    
+    if (profile) {
+        // 1. Hydrate Ledger / Measurements
+        const m = profile.measurements || {};
+        DOM.mChest.value = m.chest || '';
+        DOM.mInseam.value = m.inseam || '';
+        DOM.mWaist.value = m.waist || '';
+        DOM.mHeight.value = m.height || '';
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .maybeSingle();
+        // 2. Hydrate Preferences (Style DNA)
+        if (profile.preferences) {
+            STATE.userPreferences = profile.preferences;
+            
+            // Hydrate specific UI Chips
+            document.querySelectorAll('.chip').forEach(chip => {
+                const val = chip.getAttribute('data-val');
+                if (STATE.userPreferences.fits?.includes(val) || STATE.userPreferences.brands?.includes(val)) {
+                    chip.classList.add('active');
+                }
+            });
 
-  if (error) {
-    console.warn('Failed to load profile:', error.message);
-    return;
+            // Hydrate custom tag pills
+            document.querySelectorAll('.tag-pill').forEach(p => p.remove()); // Clear existing
+            if (STATE.userPreferences.additional) {
+                STATE.userPreferences.additional.forEach(tag => {
+                    const pill = document.createElement('div');
+                    pill.className = 'tag-pill';
+                    pill.innerHTML = `${escapeHtml(tag)} <span onclick="this.parentElement.remove()">✕</span>`;
+                    DOM.tagWrapper.insertBefore(pill, DOM.customPrefInput);
+                });
+            }
+        }
+    }
+  } catch (err) {
+    console.warn('Failed to load profile/preferences:', err.message);
   }
 
-  if (data) {
-    DOM.mChest.value = data.chest || '';
-    DOM.mInseam.value = data.inseam || '';
-    DOM.mWaist.value = data.waist || '';
-    DOM.mHeight.value = data.height || '';
-  }
-
+  // Bind measurement autosave listener exactly once
   if (STATE.profileListenersBound) return;
 
-  const persistProfile = async () => {
+  const persistMeasurements = async () => {
     try {
-      const latestUser = await getCurrentUser();
-      if (!latestUser) return;
-
-      const payload = {
-        id: latestUser.id,
-        chest: DOM.mChest.value || null,
-        inseam: DOM.mInseam.value || null,
-        waist: DOM.mWaist.value || null,
-        height: DOM.mHeight.value || null,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: upsertError } = await supabase.from('profiles').upsert(payload);
-      if (upsertError) throw upsertError;
+      await apiFetch('/api/user/profile', {
+          method: 'POST',
+          body: {
+              measurements: {
+                  chest: DOM.mChest.value || null,
+                  inseam: DOM.mInseam.value || null,
+                  waist: DOM.mWaist.value || null,
+                  height: DOM.mHeight.value || null
+              }
+          }
+      });
     } catch (err) {
-      console.warn('Failed to persist profile:', err.message || err);
+      console.warn('Failed to persist measurements:', err.message || err);
     }
   };
 
   [DOM.mChest, DOM.mInseam, DOM.mWaist, DOM.mHeight].forEach((input) => {
-    input.addEventListener('change', persistProfile);
+    input.addEventListener('change', persistMeasurements);
   });
 
   STATE.profileListenersBound = true;
+}
+
+// --- SAVE PREFERENCES ACTION ---
+async function handleSavePreferences() {
+  DOM.savePreferencesBtn.innerText = "Saving...";
+  DOM.savePreferencesBtn.disabled = true;
+
+  STATE.userPreferences.fits = Array.from(document.querySelectorAll('#fitChips .chip.active')).map(el => el.getAttribute('data-val'));
+  STATE.userPreferences.brands = Array.from(document.querySelectorAll('#brandChips .chip.active')).map(el => el.getAttribute('data-val'));
+  
+  // Clean '✕' character out of tag text if grabbed directly from textContent
+  STATE.userPreferences.additional = Array.from(document.querySelectorAll('.tag-pill')).map(el => {
+      let text = el.textContent || "";
+      return text.replace('✕', '').trim();
+  });
+
+  try {
+    await apiFetch('/api/user/profile', {
+      method: 'POST',
+      body: { preferences: STATE.userPreferences }
+    });
+
+    DOM.savePreferencesBtn.innerText = "Save Profile";
+    setVisible(DOM.prefSaveStatus, true);
+    
+    setTimeout(() => {
+        setVisible(DOM.prefSaveStatus, false);
+        DOM.preferencesModal.classList.remove('active');
+    }, 2000);
+    
+  } catch (error) {
+    console.error(error);
+    DOM.savePreferencesBtn.innerText = "Error - Try Again";
+  } finally {
+    DOM.savePreferencesBtn.disabled = false;
+  }
 }
 
 async function handleAuthState(session) {
@@ -933,7 +997,6 @@ function buildAnalysisPayload({ image, mode, climateData }) {
     mode,
     occasion: selectedOccasion || 'General',
     notes: finalNotes,
-    fitPreference: DOM.fitPreferenceEl.value || '',
     contrast: DOM.contrastProfile.value,
     climate: climateData,
     mood: currentMood,
@@ -943,6 +1006,7 @@ function buildAnalysisPayload({ image, mode, climateData }) {
       waist: DOM.mWaist.value,
       height: DOM.mHeight.value,
     },
+    userPreferences: STATE.userPreferences, // INJECTS GLOBAL PREFERENCES HERE
     stressTest: false,
     edgeCaseMode: false,
   };
@@ -1556,6 +1620,7 @@ async function handleGhostSimulation() {
       body: {
         ghostItemImageBase64: base64Image,
         ghostItemDescription: DOM.ghostDesc.value.trim(),
+        userPreferences: STATE.userPreferences // INJECTED PREFERENCES
       },
     });
 
@@ -1606,7 +1671,10 @@ async function handleAcquisitionBoard() {
   try {
     const response = await apiFetch('/api/chat', {
       method: 'POST',
-      body: { mode: 'acquisition_board' },
+      body: { 
+          mode: 'acquisition_board',
+          userPreferences: STATE.userPreferences // INJECTED PREFERENCES
+      },
     });
 
     const data = await readStreamingJsonResponse(response);
@@ -1834,6 +1902,31 @@ function bindEvents() {
     if (event.target === DOM.genericModal) closeGenericModal();
   });
 
+  // --- PREFERENCES UI EVENTS ---
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', (e) => {
+      e.target.classList.toggle('active');
+    });
+  });
+
+  if(DOM.customPrefInput) {
+    DOM.customPrefInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && DOM.customPrefInput.value.trim() !== '') {
+        e.preventDefault();
+        const tagText = DOM.customPrefInput.value.trim();
+        const pill = document.createElement('div');
+        pill.className = 'tag-pill';
+        pill.innerHTML = `${escapeHtml(tagText)} <span onclick="this.parentElement.remove()">✕</span>`;
+        DOM.tagWrapper.insertBefore(pill, DOM.customPrefInput);
+        DOM.customPrefInput.value = ''; 
+      }
+    });
+  }
+
+  if(DOM.savePreferencesBtn) {
+      DOM.savePreferencesBtn.addEventListener('click', handleSavePreferences);
+  }
+
   document.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -1931,82 +2024,3 @@ window.EleVateApp = {
   openDossierModal,
   downloadDossier,
 };
-// --- GLOBAL PREFERENCES STATE ---
-let userPreferences = {
-  fits: [],
-  brands: [],
-  additional: []
-};
-
-// --- CHIP SELECTION LOGIC ---
-document.querySelectorAll('.chip').forEach(chip => {
-  chip.addEventListener('click', (e) => {
-    e.target.classList.toggle('active');
-  });
-});
-
-// --- TAG INPUT LOGIC (Additional Preferences) ---
-const tagInput = document.getElementById('customPrefInput');
-const tagWrapper = document.getElementById('tagWrapper');
-
-tagInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && tagInput.value.trim() !== '') {
-    e.preventDefault();
-    const tagText = tagInput.value.trim();
-    
-    // Create Tag Pill
-    const pill = document.createElement('div');
-    pill.className = 'tag-pill';
-    pill.innerHTML = `${tagText} <span onclick="this.parentElement.remove()">✕</span>`;
-    
-    // Insert before the input field
-    tagWrapper.insertBefore(pill, tagInput);
-    tagInput.value = ''; // clear input
-  }
-});
-
-// --- LOAD PREFERENCES (Call this after User Auth) ---
-async function loadUserPreferences(uid) {
-  // DB Fetch logic here (e.g., Firebase getDoc)
-  // const docSnap = await getDoc(doc(db, "users", uid));
-  // if (docSnap.exists() && docSnap.data().preferences) { ... map values to UI ... }
-}
-
-// --- SAVE PREFERENCES ---
-document.getElementById('savePreferencesBtn').addEventListener('click', async () => {
-  const saveBtn = document.getElementById('savePreferencesBtn');
-  saveBtn.innerText = "Saving...";
-
-  // 1. Gather active Fit chips
-  userPreferences.fits = Array.from(document.querySelectorAll('#fitChips .chip.active'))
-                              .map(el => el.getAttribute('data-val'));
-                              
-  // 2. Gather active Brand chips
-  userPreferences.brands = Array.from(document.querySelectorAll('#brandChips .chip.active'))
-                                .map(el => el.getAttribute('data-val'));
-
-  // 3. Gather custom tags
-  userPreferences.additional = Array.from(document.querySelectorAll('.tag-pill'))
-                                    .map(el => el.childNodes[0].nodeValue.trim());
-
-  try {
-    // DB Save logic here (e.g., Firebase updateDoc)
-    /*
-    await updateDoc(doc(db, "users", currentUser.uid), {
-      preferences: userPreferences
-    });
-    */
-    
-    // Show success
-    saveBtn.innerText = "Save Profile";
-    document.getElementById('prefSaveStatus').classList.remove('hidden');
-    setTimeout(() => {
-        document.getElementById('prefSaveStatus').classList.add('hidden');
-        document.getElementById('preferencesModal').classList.remove('active');
-    }, 2000);
-    
-  } catch (error) {
-    console.error(error);
-    saveBtn.innerText = "Error - Try Again";
-  }
-});
