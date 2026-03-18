@@ -497,66 +497,68 @@ app.post("/api/chat", async (req, res, next) => {
 
     let vaultContext = "No wardrobe items available.";
     
-    if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
+    // UPDATED: 'work_trip_curator' added to the whitelist so the AI can see the closet!
+    if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
             .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
+    // UPDATED: Using strictly valid JSON templates to prevent 500 parsing crashes
     let dynamicJSONSchema = "";
     if (data.mode === 'fit') {
       dynamicJSONSchema = `{
-        "score": <calculate a number between 0 and 100 representing overall fit/proportion>,
-        "tier": "<assign tier based on the classification scale above>",
-        "verdict": "<A brief summary of how the current silhouette and proportions look>",
-        "archetype": "<assign an archetype: e.g., The Executive, The Classicist>",
+        "score": 85,
+        "tier": "Refined",
+        "verdict": "A brief summary of how the current silhouette and proportions look.",
+        "archetype": "The Executive",
         "fit_anatomy": {
-          "shoulders_and_chest": ["<Analyze shoulder seam placement, lapel bowing, or chest pulling>", "<Additional chest note>"],
-          "waist_and_torso": ["<Analyze waist suppression, shirt billowing, or jacket button tension>", "<Additional torso note>"],
-          "legs_and_hem": ["<Analyze trouser break (e.g. full/half/none), drape, and taper>", "<Additional leg note>"]
+          "shoulders_and_chest": ["Analyze shoulder seam placement", "Additional chest note"],
+          "waist_and_torso": ["Analyze waist suppression", "Additional torso note"],
+          "legs_and_hem": ["Analyze trouser break", "Additional leg note"]
         },
-        "alteration_blueprint": ["<Specific tailor instruction 1, e.g., 'Take in waist 1.5 inches'>", "<Specific tailor instruction 2>"],
-        "missing_pieces": ["<A piece that would improve this silhouette>"]
+        "alteration_blueprint": ["Take in waist 1.5 inches", "Specific tailor instruction 2"],
+        "missing_pieces": ["A piece that would improve this silhouette"]
       }`;
     } else {
       dynamicJSONSchema = `{
-        "score": <calculate a number between 0 and 100>,
-        "tier": "<assign tier based on the classification scale above>",
-        "verdict": "<A brief summary of the look.>",
-        "archetype": "<assign an archetype: e.g., The Executive, The Minimalist>",
-        "breakdown": { "color": <number 0-20>, "occasion": <number 0-20>, "fit": <number 0-20>, "cohesion": <number 0-20>, "presence": <number 0-20> },
-        "styling_notes": ["<Note 1>", "<Note 2>"],
+        "score": 90,
+        "tier": "Elite",
+        "verdict": "A brief summary of the look.",
+        "archetype": "The Executive",
+        "breakdown": { "color": 18, "occasion": 18, "fit": 18, "cohesion": 18, "presence": 18 },
+        "styling_notes": ["Note 1", "Note 2"],
         "outfit_combinations": [
-          { "name": "<Look Name>", "reasoning": "<Why this works>", "item_ids": ["<exact_id_from_vault>"] }
+          { "name": "Day 1 Look", "reasoning": "Why this works", "item_ids": ["exact_id_from_vault", "exact_id_from_vault_2"] }
         ],
-        "what_works": ["<Strength 1>"],
-        "recommendations": ["<Upgrade 1>"],
-        "missing_pieces": ["<Gap 1>"],
+        "what_works": ["Strength 1"],
+        "recommendations": ["Upgrade 1"],
+        "missing_pieces": ["Gap 1"],
         "acquisition_list": [
-          { "item": "<Item Name>", "priority": "<High/Medium/Low>", "reasoning": "<Why>" }
+          { "item": "Item Name", "priority": "High", "reasoning": "Why" }
         ]
       }`;
     }
 
-    // --- AI MULTI-DAY & MODE DIRECTIVE FIX ---
     let modeSpecificInstructions = "";
     if (data.mode === 'match_vibe') {
         modeSpecificInstructions = `
-    MATCH MY VIBE DIRECTIVE: The provided image is the user's partner. Do NOT critique the partner's fit. 
-    1. Extract the partner's color palette, formality level, and core aesthetic. 
-    2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe' JSON provided. 
-    3. CRITICAL IMAGE RENDERING RULE: For EVERY item you select for the user, you MUST copy its exact string "id" from the JSON and place it into the "item_ids" array in your output. If you fail to include the exact IDs, the app will break and the images will not load. Do not invent items.
-    4. Detail the color matching theory used (e.g., complementary, analogous) in your 'reasoning'.`;
+    MATCH MY VIBE DIRECTIVE: The provided image is the partner. Do NOT critique the partner's fit. 
+    1. Extract the partner's color palette, formality, and core aesthetic. 
+    2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe'. 
+    3. CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the JSON into the "item_ids" array.
+    4. Detail the color matching theory used.`;
     } else if (data.mode === 'office_curation') {
         modeSpecificInstructions = `
-    OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Each object should be named "Day 1", "Day 2", etc.`;
+    OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
+    CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.`;
+    TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.
+    CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     }
 
-    // --- AI PREFERENCE INJECTION ---
     let prefsContext = "";
     if (data.userPreferences && (data.userPreferences.fits?.length || data.userPreferences.brands?.length || data.userPreferences.additional?.length)) {
         prefsContext = `
@@ -565,7 +567,7 @@ app.post("/api/chat", async (req, res, next) => {
     - Preferred Brands/Houses: ${data.userPreferences.brands?.join(", ") || "None specified"}
     - Style Rules & Preferences: ${data.userPreferences.additional?.join(", ") || "None specified"}
     
-    You MUST adhere strictly to these preferences. If recommending acquisitions, prioritize the preferred brands (or equivalents) and silhouettes that match their fit type. Follow all custom style rules closely.`;
+    You MUST adhere strictly to these preferences.`;
     }
 
     const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
@@ -579,16 +581,10 @@ app.post("/api/chat", async (req, res, next) => {
     ${modeSpecificInstructions}
     
     CRITICAL DIRECTIVES:
-    1. Ignore any human features in the photo. Focus entirely on the clothing and geometry. 
-    2. YOU MUST CALCULATE REAL SCORES based on the garments. DO NOT USE PLACEHOLDER NUMBERS.
-    3. TIER CLASSIFICATION SYSTEM: You must strictly assign the "tier" based on your final calculated "score" using this exact scale:
-       - 0 to 59 = "Baseline"
-       - 60 to 69 = "Functional"
-       - 70 to 79 = "Intentional"
-       - 80 to 89 = "Refined"
-       - 90 to 100 = "Elite"
-    
-    YOUR OUTPUT MUST BE STRICTLY VALID JSON. DO NOT WRAP IN MARKDOWN. You must perfectly match this exact structure:
+    1. Ignore human features in the photo. Focus on clothing and geometry. 
+    2. YOU MUST CALCULATE REAL SCORES (0-100).
+    3. TIER CLASSIFICATION: 0-59="Baseline", 60-69="Functional", 70-79="Intentional", 80-89="Refined", 90-100="Elite".
+    4. OUTPUT ONLY VALID PARSABLE JSON. NO MARKDOWN. NO HTML. PERFECTLY MATCH THIS STRUCTURE:
     ${dynamicJSONSchema}`;
 
     const messages = [{ role: "system", content: systemPrompt }];
@@ -632,10 +628,12 @@ app.post("/api/chat", async (req, res, next) => {
         }
     }
 
+    // UPDATED: Bulletproof JSON extraction to prevent parsing crashes
     try {
         let cleanJson = fullResponse.trim();
-        if (cleanJson.startsWith('```')) {
-            cleanJson = cleanJson.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            cleanJson = jsonMatch[0];
         }
         
         const parsedJson = JSON.parse(cleanJson);
