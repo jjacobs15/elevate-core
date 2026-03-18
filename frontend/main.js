@@ -471,11 +471,11 @@ async function handleSavePreferences() {
       return text.replace('✕', '').trim();
   });
 
-  // NEW FIX: Grab any pending typed text that hasn't been entered yet
-  const pendingInput = DOM.customPrefInput.value.trim();
-  if (pendingInput !== "") {
+  // Grab any pending typed text that hasn't been entered yet
+  const pendingInput = DOM.customPrefInput?.value?.trim();
+  if (pendingInput && pendingInput !== "") {
       STATE.userPreferences.additional.push(pendingInput);
-      DOM.customPrefInput.value = ''; // clear it out after grabbing
+      DOM.customPrefInput.value = ''; 
   }
 
   try {
