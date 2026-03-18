@@ -127,9 +127,9 @@ const ProfileUpdateSchema = z.object({
 app.get("/api/user/profile", async (req, res, next) => {
   try {
     const { data, error } = await req.supabase
-      .from("profiles") // UPDATED FROM user_profiles
+      .from("profiles") // UPDATED: Correct table name
       .select("measurements, silhouette_id, preferences")
-      .eq("user_id", req.user.id)
+      .eq("id", req.user.id) // UPDATED: Correct column name
       .single();
 
     if (error && error.code !== 'PGRST116') {
@@ -147,14 +147,14 @@ app.post("/api/user/profile", async (req, res, next) => {
     const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
     const { data, error } = await req.supabase
-      .from("profiles") // UPDATED FROM user_profiles
+      .from("profiles") // UPDATED: Correct table name
       .upsert({
-        user_id: req.user.id,
+        id: req.user.id, // UPDATED: Correct column name
         ...(measurements && { measurements }),
         ...(silhouette_id !== undefined && { silhouette_id }),
         ...(preferences && { preferences }),
         updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' })
+      }, { onConflict: 'id' }) // UPDATED: Correct conflict column
       .select()
       .single();
 
