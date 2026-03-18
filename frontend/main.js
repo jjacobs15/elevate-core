@@ -471,6 +471,13 @@ async function handleSavePreferences() {
       return text.replace('✕', '').trim();
   });
 
+  // NEW FIX: Grab any pending typed text that hasn't been entered yet
+  const pendingInput = DOM.customPrefInput.value.trim();
+  if (pendingInput !== "") {
+      STATE.userPreferences.additional.push(pendingInput);
+      DOM.customPrefInput.value = ''; // clear it out after grabbing
+  }
+
   try {
     await apiFetch('/api/user/profile', {
       method: 'POST',
@@ -483,6 +490,7 @@ async function handleSavePreferences() {
     setTimeout(() => {
         setVisible(DOM.prefSaveStatus, false);
         DOM.preferencesModal.classList.remove('active');
+        syncUserProfile(); // Refresh UI to show newly saved pending tag
     }, 2000);
     
   } catch (error) {

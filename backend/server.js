@@ -311,13 +311,15 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
     let prefsContext = "";
     if (userPreferences && (userPreferences.fits?.length || userPreferences.brands?.length || userPreferences.additional?.length)) {
         prefsContext = `
-        CRITICAL USER STYLE DNA:
-        - Preferred Fits: ${userPreferences.fits?.join(", ") || "None specified"}
-        - Preferred Brands: ${userPreferences.brands?.join(", ") || "None specified"}
-        - Style Rules: ${userPreferences.additional?.join(", ") || "None specified"}
-        
-        Ensure your aesthetic impact evaluation and missing piece recommendations strictly align with these preferences.
-        `;
+    CRITICAL USER STYLE DNA DIRECTIVE:
+    - Preferred Fits: ${userPreferences.fits?.join(", ") || "None specified"}
+    - Preferred Brands/Houses: ${userPreferences.brands?.join(", ") || "None specified"}
+    - Style Rules & Colors: ${userPreferences.additional?.join(", ") || "None specified"}
+    
+    You MUST adhere strictly to these preferences. When recommending new items to buy in the Acquisition Board or Missing Pieces, you MUST explicitly name-drop their preferred brands in your reasoning. 
+    
+    DO NOT generate URLs, website links, or search queries. 
+    Instead, write natural, authoritative recommendations seamlessly integrating their style rules. For example: "Johnston & Murphy has the tailored earth-tone jacket you need to complete this look," or "Look to Peter Millar for a breathable, modern-fit polo." Match the specific missing item to the brand from their list that is most appropriate.`;
     }
 
     const GhostSchema = z.object({
@@ -562,12 +564,15 @@ app.post("/api/chat", async (req, res, next) => {
     let prefsContext = "";
     if (data.userPreferences && (data.userPreferences.fits?.length || data.userPreferences.brands?.length || data.userPreferences.additional?.length)) {
         prefsContext = `
-    CRITICAL USER STYLE DNA:
+    CRITICAL USER STYLE DNA DIRECTIVE:
     - Preferred Fits: ${data.userPreferences.fits?.join(", ") || "None specified"}
     - Preferred Brands/Houses: ${data.userPreferences.brands?.join(", ") || "None specified"}
-    - Style Rules & Preferences: ${data.userPreferences.additional?.join(", ") || "None specified"}
+    - Style Rules & Colors: ${data.userPreferences.additional?.join(", ") || "None specified"}
     
-    You MUST adhere strictly to these preferences.`;
+    You MUST adhere strictly to these preferences. When recommending new items to buy in the Acquisition Board or Missing Pieces, you MUST explicitly name-drop their preferred brands in your reasoning. 
+    
+    DO NOT generate URLs, website links, or search queries. 
+    Instead, write natural, authoritative recommendations seamlessly integrating their style rules. For example: "Johnston & Murphy has the tailored earth-tone jacket you need to complete this look," or "Look to Peter Millar for a breathable, modern-fit polo." Match the specific missing item to the brand from their list that is most appropriate.`;
     }
 
     const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
