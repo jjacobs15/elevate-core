@@ -115,7 +115,7 @@ function cacheDom() {
     categoryEl: $('category'),
     occasionEl: $('occasion'),
     customOccasionEl: $('customOccasion'),
-    fitPreferenceEl: $('fitPreference', false), // Optional now that it's globally handled
+    fitPreferenceEl: $('fitPreference', false),
     previewImg: $('imagePreview'),
     imageFrame: $('imageFrame'),
     tailorInstructions: $('tailorInstructions'),
@@ -1097,6 +1097,7 @@ function resolveOutfitImages(outfitObj) {
   return { validUrls, validIds };
 }
 
+// --- UPDATED HTML GENERATOR FOR VERTICAL FULL-WIDTH MULTI-DAY CARDS ---
 function generateHTMLFromData(data, displayMode) {
   let html = '';
   let score = data.score ?? 0;
@@ -1125,31 +1126,45 @@ function generateHTMLFromData(data, displayMode) {
     html += `<div class="card"><div class="label">Sartorial Breakdown</div><div class="breakdown-grid">${createBar('Color', breakdown.color || 0)}${createBar('Occasion', breakdown.occasion || 0)}${createBar('Fit', breakdown.fit || 0)}${createBar('Cohesion', breakdown.cohesion || 0)}${createBar('Presence', breakdown.presence || 0)}</div></div>`;
   }
 
-  if (['wardrobe_builder', 'travel_curator', 'work_trip_curator', 'office_curation', 'morning_briefing', 'match_vibe'].includes(displayMode)) {
+  const multiDayModes = ['office_curation', 'travel_curator', 'work_trip_curator'];
+  const singleDayModes = ['wardrobe_builder', 'morning_briefing', 'match_vibe'];
+
+  if (multiDayModes.includes(displayMode) || singleDayModes.includes(displayMode)) {
     if (Array.isArray(data.outfit_combinations) && data.outfit_combinations.length > 0) {
-      if (displayMode === 'office_curation') {
-        html += '<div class="card"><div class="label">Weekly Office Rotation</div><div class="week-grid">';
-        data.outfit_combinations.forEach((outfit) => {
-          const { validUrls } = resolveOutfitImages(outfit);
-          html += `<div class="day-card"><div class="day-header">${escapeHtml(outfit.name || 'Workday')}</div><div class="day-body">${escapeHtml(outfit.reasoning || '')}</div>`;
+      
+      if (multiDayModes.includes(displayMode)) {
+        // FULL-WIDTH STACKED LAYOUT FOR TRIPS AND WEEKS
+        let label = 'Curated Itinerary';
+        if (displayMode === 'office_curation') label = 'Weekly Office Rotation';
+        if (displayMode === 'travel_curator') label = 'Vacation Capsule';
+        if (displayMode === 'work_trip_curator') label = 'Business Trip Capsule';
+
+        html += `<div class="label" style="margin-top:30px; margin-bottom:16px;">${escapeHtml(label)}</div>`;
+
+        data.outfit_combinations.forEach((outfit, index) => {
+          const { validUrls, validIds } = resolveOutfitImages(outfit);
+          html += `<div class="card" style="margin-top:0; margin-bottom:20px; border-left:2px solid var(--accent-gold);">`;
+          html += `<div style="color:var(--text-main); font-size:14px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Day ${index + 1}: ${escapeHtml(outfit.name || 'Look')}</div>`;
+          html += `<div style="color:#D1D5DB; font-size:12px; margin-bottom:16px; line-height:1.6; font-weight:300;">${escapeHtml(outfit.reasoning || '')}</div>`;
+
           if (validUrls.length > 0) {
-            html += '<div class="day-items">';
+            html += `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; margin-bottom:16px;">`;
             validUrls.forEach((url) => {
-              html += `<img src="${escapeHtml(url)}" loading="lazy" alt="Outfit item">`;
+              html += `<img src="${escapeHtml(url)}" loading="lazy" style="width:100%; height:160px; object-fit:cover; border-radius:6px; border:1px solid rgba(255,255,255,0.05);" alt="Outfit item">`;
             });
-            html += '</div>';
+            html += `</div>`;
           }
-          html += '</div>';
+          
+          if (validIds.length > 0) {
+            html += `<button class="action-btn js-log-nightstand" data-item-ids="${escapeHtml(JSON.stringify(validIds))}" style="margin-top:0;">Log This Wear</button>`;
+          }
+          html += `</div>`;
         });
-        html += '</div></div>';
+        
       } else {
-        const label = displayMode === 'travel_curator' || displayMode === 'work_trip_curator'
-          ? 'The Packing List'
-          : displayMode === 'morning_briefing'
-            ? 'The Daily Recommendation'
-            : displayMode === 'match_vibe'
-              ? 'Coordinated Outfits'
-              : 'Outfit Combinations';
+        // SINGLE DAY LAYOUT
+        const label = displayMode === 'morning_briefing' ? 'The Daily Recommendation' :
+                      displayMode === 'match_vibe' ? 'Coordinated Outfits' : 'Outfit Combinations';
 
         html += `<div class="card"><div class="label">${escapeHtml(label)}</div>`;
         data.outfit_combinations.forEach((outfit) => {
@@ -1166,7 +1181,7 @@ function generateHTMLFromData(data, displayMode) {
             html += '</div>';
           }
 
-          if ((displayMode === 'morning_briefing' || displayMode === 'wardrobe_builder' || displayMode === 'match_vibe') && validIds.length > 0) {
+          if (validIds.length > 0) {
             html += `<button class="action-btn js-log-nightstand" data-item-ids="${escapeHtml(JSON.stringify(validIds))}" style="border-color:rgba(255,255,255,0.2); color:white; margin-top:15px;">Log This Wear</button>`;
           }
 
