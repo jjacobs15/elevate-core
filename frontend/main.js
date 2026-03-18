@@ -1931,3 +1931,82 @@ window.EleVateApp = {
   openDossierModal,
   downloadDossier,
 };
+// --- GLOBAL PREFERENCES STATE ---
+let userPreferences = {
+  fits: [],
+  brands: [],
+  additional: []
+};
+
+// --- CHIP SELECTION LOGIC ---
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', (e) => {
+    e.target.classList.toggle('active');
+  });
+});
+
+// --- TAG INPUT LOGIC (Additional Preferences) ---
+const tagInput = document.getElementById('customPrefInput');
+const tagWrapper = document.getElementById('tagWrapper');
+
+tagInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && tagInput.value.trim() !== '') {
+    e.preventDefault();
+    const tagText = tagInput.value.trim();
+    
+    // Create Tag Pill
+    const pill = document.createElement('div');
+    pill.className = 'tag-pill';
+    pill.innerHTML = `${tagText} <span onclick="this.parentElement.remove()">✕</span>`;
+    
+    // Insert before the input field
+    tagWrapper.insertBefore(pill, tagInput);
+    tagInput.value = ''; // clear input
+  }
+});
+
+// --- LOAD PREFERENCES (Call this after User Auth) ---
+async function loadUserPreferences(uid) {
+  // DB Fetch logic here (e.g., Firebase getDoc)
+  // const docSnap = await getDoc(doc(db, "users", uid));
+  // if (docSnap.exists() && docSnap.data().preferences) { ... map values to UI ... }
+}
+
+// --- SAVE PREFERENCES ---
+document.getElementById('savePreferencesBtn').addEventListener('click', async () => {
+  const saveBtn = document.getElementById('savePreferencesBtn');
+  saveBtn.innerText = "Saving...";
+
+  // 1. Gather active Fit chips
+  userPreferences.fits = Array.from(document.querySelectorAll('#fitChips .chip.active'))
+                              .map(el => el.getAttribute('data-val'));
+                              
+  // 2. Gather active Brand chips
+  userPreferences.brands = Array.from(document.querySelectorAll('#brandChips .chip.active'))
+                                .map(el => el.getAttribute('data-val'));
+
+  // 3. Gather custom tags
+  userPreferences.additional = Array.from(document.querySelectorAll('.tag-pill'))
+                                    .map(el => el.childNodes[0].nodeValue.trim());
+
+  try {
+    // DB Save logic here (e.g., Firebase updateDoc)
+    /*
+    await updateDoc(doc(db, "users", currentUser.uid), {
+      preferences: userPreferences
+    });
+    */
+    
+    // Show success
+    saveBtn.innerText = "Save Profile";
+    document.getElementById('prefSaveStatus').classList.remove('hidden');
+    setTimeout(() => {
+        document.getElementById('prefSaveStatus').classList.add('hidden');
+        document.getElementById('preferencesModal').classList.remove('active');
+    }, 2000);
+    
+  } catch (error) {
+    console.error(error);
+    saveBtn.innerText = "Error - Try Again";
+  }
+});

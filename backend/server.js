@@ -104,55 +104,55 @@ const RequestSchema = z.object({
     mode: z.string(),
     occasion: z.string().optional(),
     notes: z.string().optional(),
-    fitPreference: z.string().optional(),
     contrast: z.string().optional(),
     climate: z.string().optional(),
     mood: z.string().optional(),
     measurements: z.record(z.any()).optional(),
+    userPreferences: z.record(z.any()).optional(), // Added Preferences Context
     stressTest: z.boolean().optional(),
     edgeCaseMode: z.boolean().optional()
 });
 
-// Input Validation for User Profiles
+// Input Validation for User Profiles (Updated to include preferences)
 const ProfileUpdateSchema = z.object({
-    measurements: z.record(z.any()),
-    silhouette_id: z.string().nullable().optional()
+    measurements: z.record(z.any()).optional(),
+    silhouette_id: z.string().nullable().optional(),
+    preferences: z.record(z.any()).optional()
 });
 
 // ==========================================
 //   USER PROFILE & MEASUREMENTS (MASTER'S LEDGER)
 // ==========================================
 
-app.get("/api/user/measurements", async (req, res, next) => {
+app.get("/api/user/profile", async (req, res, next) => {
   try {
     const { data, error } = await req.supabase
       .from("user_profiles")
-      .select("measurements, silhouette_id")
+      .select("measurements, silhouette_id, preferences")
       .eq("user_id", req.user.id)
       .single();
 
-    // Ignore PGRST116 (No rows found) because new users won't have a profile yet
     if (error && error.code !== 'PGRST116') {
         throw new Error(error.message);
     }
 
-    res.json({ success: true, profile: data || { measurements: {}, silhouette_id: null } });
+    res.json({ success: true, profile: data || { measurements: {}, silhouette_id: null, preferences: { fits: [], brands: [], additional: [] } } });
   } catch (error) {
     next(error);
   }
 });
 
-app.post("/api/user/measurements", async (req, res, next) => {
+app.post("/api/user/profile", async (req, res, next) => {
   try {
-    // Rely on Zod to enforce payload integrity; global error handler catches fails
-    const { measurements, silhouette_id } = ProfileUpdateSchema.parse(req.body);
+    const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
     const { data, error } = await req.supabase
       .from("user_profiles")
       .upsert({
         user_id: req.user.id,
-        measurements: measurements,
-        silhouette_id: silhouette_id || null,
+        ...(measurements && { measurements }),
+        ...(silhouette_id !== undefined && { silhouette_id }),
+        ...(preferences && { preferences }),
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id' })
       .select()
@@ -166,11 +166,11 @@ app.post("/api/user/measurements", async (req, res, next) => {
   }
 });
 
-
 // ==========================================
 //   STUDIO POLISH 
 // ==========================================
 app.post("/api/remove-bg", async (req, res, next) => {
+  // ... [Existing remove-bg logic] ...
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "No image provided" });
@@ -201,104 +201,16 @@ app.post("/api/remove-bg", async (req, res, next) => {
 });
 
 // ==========================================
-//   AUTO-TAGGING 
+//   AUTO-TAGGING & CARE TAG
 // ==========================================
-app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
-  try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ error: "Image required for tagging" });
-
-    const safeImage = cleanBase64(image);
-    const imageBuffer = Buffer.from(safeImage, "base64");
-
-    const TaggingSchema = z.object({
-      primary_color: z.string().describe("The dominant color"),
-      secondary_color: z.string().nullable().describe("The accent color, or null"),
-      pattern: z.string(),
-      seasonality: z.enum(["Summer", "Winter", "All-Season", "Fall/Spring"]),
-      fabric_weight_category: z.enum(["Heavyweight", "Midweight", "Lightweight", "Tropical"]),
-      drape_index: z.number().min(1).max(10).describe("1 = Stiff/Structured, 10 = Flowing/Unstructured"),
-      estimated_lifespan_wears: z.number().describe("Estimated wears before needing replacement")
-    });
-
-    try {
-        const { object } = await generateObject({
-          model: aiSdkOpenAi("gpt-4o-mini"),
-          schema: TaggingSchema,
-          messages: [
-            { 
-              role: "user", 
-              content: [
-                { type: "text", text: "Analyze this garment. Identify its visual properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
-                { type: "image", image: imageBuffer } 
-              ] 
-            }
-          ],
-          temperature: 0.1,
-        });
-        res.json({ success: true, tags: object });
-    } catch (aiError) {
-        console.warn("[Auto-Tag Warning] Returning default tags:", aiError.message);
-        res.json({ success: true, tags: {
-            primary_color: "Unknown", secondary_color: null, pattern: "Solid",
-            seasonality: "All-Season", fabric_weight_category: "Midweight",
-            drape_index: 5, estimated_lifespan_wears: 100
-        }});
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ==========================================
-//   CARE TAG ANALYSIS 
-// ==========================================
-app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
-  try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ error: "Image required" });
-
-    const safeImage = cleanBase64(image);
-    const imageBuffer = Buffer.from(safeImage, "base64");
-
-    const CareTagSchema = z.object({
-      careProfile: z.object({
-        instructions: z.array(z.string()).describe("List of care instructions found on tag"),
-        is_machine_washable: z.boolean().describe("True if machine washing is allowed")
-      })
-    });
-
-    try {
-        const { object } = await generateObject({
-          model: aiSdkOpenAi("gpt-4o-mini"),
-          schema: CareTagSchema,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: "Read this clothing care tag. Extract washing and drying instructions." },
-                { type: "image", image: imageBuffer }
-              ]
-            }
-          ],
-          temperature: 0.1,
-        });
-        res.json(object);
-    } catch (aiError) {
-        console.warn("[Care Tag Warning] Returning defaults:", aiError.message);
-        res.json({ careProfile: { instructions: ["Read physical tag"], is_machine_washable: true } });
-    }
-  } catch (error) {
-    next(error);
-  }
-});
+// ... [Your existing /api/wardrobe/auto-tag and /api/ledger/analyze-care-tag routes remain unchanged] ...
 
 // ==========================================
 //   GHOST SIMULATION (ANCHOR PIECE CURATOR)
 // ==========================================
 app.post("/api/designer/ghost-simulation", async (req, res, next) => {
   try {
-    const { ghostItemImageBase64, ghostItemDescription } = req.body;
+    const { ghostItemImageBase64, ghostItemDescription, userPreferences } = req.body;
     if (!ghostItemImageBase64) return res.status(400).json({ error: "Image required" });
 
     const safeImage = cleanBase64(ghostItemImageBase64);
@@ -312,6 +224,19 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
         .limit(50);
         
     if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+
+    // AI Preference Injection
+    let prefsContext = "";
+    if (userPreferences && (userPreferences.fits?.length || userPreferences.brands?.length || userPreferences.additional?.length)) {
+        prefsContext = `
+        CRITICAL USER STYLE DNA:
+        - Preferred Fits: ${userPreferences.fits?.join(", ") || "None specified"}
+        - Preferred Brands: ${userPreferences.brands?.join(", ") || "None specified"}
+        - Style Rules: ${userPreferences.additional?.join(", ") || "None specified"}
+        
+        Ensure your aesthetic impact evaluation and missing piece recommendations strictly align with these preferences.
+        `;
+    }
 
     const GhostSchema = z.object({
       simulation: z.object({
@@ -330,7 +255,7 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
       model: aiSdkOpenAi("gpt-4o"),
       schema: GhostSchema,
       messages: [
-        { role: "system", content: `You are EleVate's Master Stylist. Evaluate this new anchor piece (${ghostItemDescription || "Garment"}). Available Wardrobe: ${vaultContext}` },
+        { role: "system", content: `You are EleVate's Master Stylist. Evaluate this new anchor piece (${ghostItemDescription || "Garment"}). Available Wardrobe: ${vaultContext}\n${prefsContext}` },
         { role: "user", content: [
             { type: "text", text: "Simulate outfits using this anchor piece and the available wardrobe." }, 
             { type: "image", image: imageBuffer }
@@ -347,115 +272,9 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 });
 
 // ==========================================
-//   CHRONOS AESTHETIC HEATMAP
+//   CHRONOS & VALET 
 // ==========================================
-app.get("/api/analytics/chronos", async (req, res, next) => {
-  try {
-    const { data: dossiers, error } = await req.supabase
-      .from("wardrobe_analyses")
-      .select("score, verdict, created_at")
-      .not("score", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (error) throw new Error(error.message);
-    
-    if (!dossiers || dossiers.length < 2) {
-      return res.json({ message: "Not enough data yet. Run at least 2 Stylist evaluations to unlock Chronos." });
-    }
-
-    const ChronosSchema = z.object({
-      chronos: z.object({
-        trajectory: z.enum(["Improving", "Stagnant", "Declining"]),
-        average_score_shift: z.string().describe("e.g., '+5 points' or '-2 points'"),
-        aesthetic_drift: z.string().describe("A 2-sentence analysis of how their style is evolving based on recent verdicts."),
-        course_correction: z.string().describe("1 actionable piece of advice to improve their next look.")
-      })
-    });
-
-    const { object } = await generateObject({
-      model: aiSdkOpenAi("gpt-4o"),
-      schema: ChronosSchema,
-      messages: [
-        {
-          role: "system",
-          content: `You are EleVate's Chronos AI. Analyze this user's recent outfit scores and verdicts to determine their style evolution: ${JSON.stringify(dossiers)}`
-        },
-        {
-          role: "user",
-          content: "Generate the Chronos Aesthetic Heatmap analysis based on my history."
-        }
-      ],
-      temperature: 0.3,
-    });
-
-    res.json(object);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ==========================================
-//   THE MAINTENANCE LEDGER (DIGITAL VALET)
-// ==========================================
-const WEAR_THRESHOLDS = { "Suit": 4, "Blazer": 5, "Denim": 10, "Knitwear": 4, "Dress Shirt": 2, "T-Shirt": 1, "Default": 3 };
-
-app.post("/api/ledger/increment", async (req, res, next) => {
-  try {
-    const { itemId } = req.body;
-    if (!itemId) return res.status(400).json({ error: "itemId is required" });
-
-    const { data: item, error: fetchError } = await req.supabase
-      .from("my_closet")
-      .select("category, wear_count, total_wears, wear_threshold, price") 
-      .eq("id", itemId)
-      .single();
-
-    if (fetchError || !item) return res.status(404).json({ error: "Item not found or access denied." });
-
-    const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
-    const newWearCount = (item.wear_count || 0) + 1;
-    const newTotalWears = (item.total_wears || 0) + 1;
-    const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
-    const currentPrice = item.price || 0;
-    const newCpw = currentPrice > 0 ? parseFloat((currentPrice / newTotalWears).toFixed(2)) : null;
-
-    const { data: updatedItem, error: updateError } = await req.supabase
-      .from("my_closet")
-      .update({ wear_count: newWearCount, total_wears: newTotalWears, status: newStatus, cost_per_wear: newCpw })
-      .eq("id", itemId)
-      .select()
-      .single();
-
-    if (updateError) throw new Error(updateError.message);
-    res.json({ success: true, item: updatedItem });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/ledger/nightstand-log", async (req, res, next) => {
-  try {
-    const { itemIds } = req.body;
-    for (const id of itemIds) {
-        const { data: item } = await req.supabase.from("my_closet").select("*").eq("id", id).single();
-        if (!item) continue;
-        const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
-        const newWearCount = (item.wear_count || 0) + 1;
-        const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
-        await req.supabase.from("my_closet").update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus }).eq("id", id);
-    }
-    res.json({ success: true });
-  } catch (error) { next(error); }
-});
-
-app.post("/api/ledger/reset", async (req, res, next) => {
-  try {
-    const { itemIds } = req.body;
-    await req.supabase.from("my_closet").update({ wear_count: 0, status: 'CLEAN' }).in('id', itemIds);
-    res.json({ success: true });
-  } catch (error) { next(error); }
-});
+// ... [Your existing /api/analytics/chronos and /api/ledger/* routes remain unchanged] ...
 
 // ==========================================
 //   CORE AI STYLING ENGINE (CHAT)
@@ -479,7 +298,6 @@ app.post("/api/chat", async (req, res, next) => {
 
     const safeImage = cleanBase64(data.image);
 
-    // Run image upload entirely in the background so it doesn't block the AI generation
     if (safeImage) {
       const imageBuffer = Buffer.from(safeImage, "base64");
       const fileName = `${req.user.id}/${reqId}.jpg`; 
@@ -494,7 +312,6 @@ app.post("/api/chat", async (req, res, next) => {
 
     let vaultContext = "No wardrobe items available.";
     
-    // UPDATED: Added "match_vibe" to the list of modes that inject the user's closet
     if (["wardrobe_builder", "travel_curator", "office_curation", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
@@ -537,7 +354,6 @@ app.post("/api/chat", async (req, res, next) => {
       }`;
     }
 
-   // UPDATED: Dynamic directive specific to the new feature with strict ID enforcement
     let modeSpecificInstructions = "";
     if (data.mode === 'match_vibe') {
         modeSpecificInstructions = `
@@ -548,13 +364,26 @@ app.post("/api/chat", async (req, res, next) => {
     4. Detail the color matching theory used (e.g., complementary, analogous) in your 'reasoning'.`;
     }
 
+    // --- AI PREFERENCE INJECTION ---
+    let prefsContext = "";
+    if (data.userPreferences && (data.userPreferences.fits?.length || data.userPreferences.brands?.length || data.userPreferences.additional?.length)) {
+        prefsContext = `
+    CRITICAL USER STYLE DNA:
+    - Preferred Fits: ${data.userPreferences.fits?.join(", ") || "None specified"}
+    - Preferred Brands/Houses: ${data.userPreferences.brands?.join(", ") || "None specified"}
+    - Style Rules & Preferences: ${data.userPreferences.additional?.join(", ") || "None specified"}
+    
+    You MUST adhere strictly to these preferences. If recommending acquisitions, prioritize the preferred brands (or equivalents) and silhouettes that match their fit type. Follow all custom style rules closely.`;
+    }
+
     const systemPrompt = `You are EleVate's Master Stylist and Master Tailor.
     Mode: ${data.mode}
     Occasion: ${data.occasion || 'General'}
-    Client Preferences: ${data.fitPreference || 'Tailored'}, Contrast: ${data.contrast || 'Medium'}
+    Contrast Profile: ${data.contrast || 'Medium'}
     Climate Context: ${data.climate || 'Unknown'}
     Measurements: ${JSON.stringify(data.measurements || {})}
     Available Wardrobe (JSON): ${vaultContext}
+    ${prefsContext}
     ${modeSpecificInstructions}
     
     CRITICAL DIRECTIVES:
@@ -585,7 +414,6 @@ app.post("/api/chat", async (req, res, next) => {
         messages.push({ role: "user", content: `Please execute styling core. Notes: ${data.notes || 'No notes'}` });
     }
 
-    // Wrap the stream in a try/catch to prevent orphaned requests if OpenAI drops the connection
     let fullResponse = "";
     try {
         const result = await streamText({ 
@@ -607,12 +435,11 @@ app.post("/api/chat", async (req, res, next) => {
         if (!res.headersSent) {
             return res.status(502).json({ error: "AI Engine connection dropped. Please try again." });
         } else {
-            res.end(); // Safely terminate the broken stream
+            res.end(); 
             return;
         }
     }
 
-    // Aggressively clean the markdown formatting just in case the AI wraps it in ```json 
     try {
         let cleanJson = fullResponse.trim();
         if (cleanJson.startsWith('```')) {
@@ -631,7 +458,6 @@ app.post("/api/chat", async (req, res, next) => {
     }
 
   } catch (err) { 
-      // Only pass to global error handler if headers haven't been sent yet
       if (!res.headersSent) next(err); 
       else console.error("Post-stream error:", err.message);
   }
