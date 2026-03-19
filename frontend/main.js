@@ -8,6 +8,7 @@
 // - Keeps the single-file structure for easier drop-in replacement
 // - Added "Match My Vibe" (match_vibe) integration
 // - INTEGRATED STYLE DNA (Global User Preferences) via unified /api/user/profile
+// - ADDED: Auto-save debounce logic for Master's Ledger (Silhouette ID)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -227,6 +228,19 @@ function withTimeout(controller, ms) {
   return window.setTimeout(() => controller.abort(), ms);
 }
 
+// --- UTILITY: Debounce for auto-saving inputs ---
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
 async function getSessionOrThrow() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw new Error(`Failed to retrieve session: ${error.message}`);
@@ -391,12 +405,14 @@ async function syncUserProfile() {
     const { profile } = await res.json();
     
     if (profile) {
+        // Hydrate inputs
         const m = profile.measurements || {};
         DOM.mChest.value = m.chest || '';
         DOM.mInseam.value = m.inseam || '';
         DOM.mWaist.value = m.waist || '';
         DOM.mHeight.value = m.height || '';
 
+        // Hydrate preferences
         if (profile.preferences) {
             STATE.userPreferences = profile.preferences;
             
@@ -422,8 +438,10 @@ async function syncUserProfile() {
     console.warn('Failed to load profile/preferences:', err.message);
   }
 
+  // Prevent duplicate listener bindings
   if (STATE.profileListenersBound) return;
 
+  // The actual save function
   const persistMeasurements = async () => {
     try {
       await apiFetch('/api/user/profile', {
@@ -437,13 +455,18 @@ async function syncUserProfile() {
               }
           }
       });
+      console.log("Master's Ledger synced successfully.");
     } catch (err) {
       console.warn('Failed to persist measurements:', err.message || err);
     }
   };
 
+  // Debounce the save function so it waits 1 second after the user stops typing
+  const debouncedSave = debounce(persistMeasurements, 1000);
+
+  // Bind to 'input' for real-time saving instead of waiting for 'change' (blur)
   [DOM.mChest, DOM.mInseam, DOM.mWaist, DOM.mHeight].forEach((input) => {
-    input.addEventListener('change', persistMeasurements);
+    if (input) input.addEventListener('input', debouncedSave);
   });
 
   STATE.profileListenersBound = true;
@@ -589,7 +612,6 @@ function updateValetButton(items = STATE.cachedVaultInventory) {
   }
 }
 
-// --- UPDATED RENDER FEED TO HANDLE ACTIVE FILTER ---
 function renderVaultItems() {
   DOM.vaultFeed.innerHTML = '';
   
@@ -668,7 +690,7 @@ async function fetchVaultInventory(backgroundOnly = false) {
 
     setVisible(DOM.vaultLoader, false);
     renderVaultDashboard(STATE.cachedVaultInventory);
-    renderVaultItems(); // Initial un-filtered load
+    renderVaultItems(); 
     
   } catch (error) {
     if (!backgroundOnly) {
@@ -1023,7 +1045,7 @@ function buildAnalysisPayload({ image, mode, climateData }) {
       waist: DOM.mWaist.value,
       height: DOM.mHeight.value,
     },
-    userPreferences: STATE.userPreferences, // INJECTS GLOBAL PREFERENCES HERE
+    userPreferences: STATE.userPreferences,
     stressTest: false,
     edgeCaseMode: false,
   };
