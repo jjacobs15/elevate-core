@@ -584,14 +584,16 @@ app.post("/api/chat", async (req, res, next) => {
     OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
+        // ARCHITECTURAL UPGRADE: The Master Travel Matrix v4.0 (Bulletproof Anatomy & Pacing)
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX:
-    1. Anatomical Completeness (CRITICAL RULE): EVERY single outfit generated (including the 'transit_outfit' and ALL daily combinations) MUST contain EXACTLY ONE 'Top', EXACTLY ONE 'Bottom' (Pants or Shorts), and EXACTLY ONE pair of 'Footwear'. You may optionally add ONE 'Outerwear' or layering piece. NEVER generate an outfit missing a Bottom. NEVER generate an outfit missing Footwear.
-    2. Suitcase Economics (The Rule of Three): Select a MAXIMUM of 3 distinct pairs of shoes from the Vault for the entire trip. You MUST intelligently re-utilize these exact 3 pairs across all days. (e.g., 1 travel/walking sneaker, 1 casual/beach shoe, 1 elevated evening shoe). Re-utilize 'Bottoms' across multiple days to mimic realistic packing.
-    3. Footwear Formality & Climate Guardrails: Cross-reference footwear against the climate and occasion. STRICTLY FORBIDDEN: Do NOT pair heavy boots with shorts or warm-weather excursions. Do NOT pair casual sandals/Birkenstocks with evening/dress wear. 
-    4. Long-Haul Transit Protocol: The 'transit_outfit' MUST prioritize physical comfort. Use soft T-shirts, stretch bottoms, and technical layers (pullovers/hoodies). STRICTLY FORBIDDEN: Stiff collared button-up shirts for transit.
-    5. Technical vs. Tailored Pacing: For daytime activities (Sightseeing, Tours, Beach), aggressively prioritize technical gear, T-shirts, and breathable casual wear from the Vault. Strictly reserve tailored/collared button-up shirts for designated dinners or upscale evenings.
-    6. Strategic Gaps (Missing Pieces): Recommend 2 destination-specific luxury essentials actually missing from the generated capsule (e.g., a specific linen trouser, a tailored jacket, or luxury sunglasses).
+    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX V4.0:
+    1. BULLETPROOF ANATOMY (CRITICAL RULE): EVERY single outfit generated (including the 'transit_outfit' and ALL daily combinations) MUST contain EXACTLY ONE 'Top', EXACTLY ONE 'Bottom' (Pants or Shorts), and EXACTLY ONE pair of 'Footwear'. NEVER generate an outfit missing a Bottom. NEVER generate an outfit missing Footwear.
+    2. TRANSIT PROTOCOL: The 'transit_outfit' MUST prioritize physical comfort AND include PANTS (do not use shorts for long-haul travel). Use soft T-shirts, stretch pants/bottoms, and technical layers. STRICTLY FORBIDDEN: Stiff collared button-up shirts for transit.
+    3. CAPSULE DIVERSITY & PACING: You MUST populate the 'capsule_roster' with AT LEAST 3 distinct bottoms from the Vault. Prioritize pacing diversity: DO NOT repeat the exact same bottom (e.g., the same pair of shorts) across consecutive daytime outfits. Space out wears. If the wardrobe lacks enough bottoms to prevent catastrophic repetition, you MUST note this explicitly as a 'Critical Wardrobe Gap' in missing_pieces.
+    4. SUITCASE ECONOMICS (FOOTWEAR): Select a MAXIMUM of 3 distinct pairs of shoes from the Vault for the entire trip. You MUST intelligently re-utilize these exact 3 pairs across all days (e.g., 1 travel/walking sneaker, 1 casual/beach shoe, 1 elevated evening shoe).
+    5. FOOTWEAR FORMALITY & CLIMATE GUARDRAILS: Cross-reference footwear against the climate and occasion. STRICTLY FORBIDDEN: Do NOT pair heavy boots with shorts or warm-weather excursions. Do NOT pair casual sandals/Birkenstocks with evening/dress wear. 
+    6. TECHNICAL VS. TAILORED PACING: For daytime activities (Sightseeing, Tours, Beach), aggressively prioritize technical gear, T-shirts, and breathable casual wear. Strictly reserve tailored/collared button-up shirts for designated dinners or upscale evenings.
+    7. STRATEGIC GAPS: Recommend 2 destination-specific luxury essentials actually missing from the generated capsule.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
@@ -698,14 +700,12 @@ app.post("/api/chat", async (req, res, next) => {
         try {
             parsedJson = JSON.parse(cleanJson);
         } catch (parseError) {
-            // Failsafe if the AI hallucinates bad characters at the end of the stream
             console.warn(`[${reqId}] Strict JSON parse failed. Attempting recovery...`);
-            // Find the last closing brace to chop off trailed hallucinated text
             const lastBraceIndex = cleanJson.lastIndexOf('}');
             if (lastBraceIndex !== -1) {
                 parsedJson = JSON.parse(cleanJson.substring(0, lastBraceIndex + 1));
             } else {
-                throw parseError; // Re-throw if totally unrecoverable
+                throw parseError; 
             }
         }
 
