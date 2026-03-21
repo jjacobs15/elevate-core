@@ -1,5 +1,5 @@
 import express from "express";
-import { streamObject, generateObject } from "ai";
+import { streamText, generateObject } from "ai";
 import { openai as aiSdkOpenAi } from "@ai-sdk/openai";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -14,7 +14,7 @@ dotenv.config();
 const app = express();
 
 // ==========================================
-//  ENVIRONMENT & FOUNDATION
+//   ENVIRONMENT & FOUNDATION
 // ==========================================
 const REQUIRED_ENVS = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "REMOVE_BG_API_KEY"];
 for (const env of REQUIRED_ENVS) {
@@ -56,7 +56,7 @@ app.use(cors({
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100, 
+  max: 30, 
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "The atelier is currently at capacity. Please wait a moment." }
@@ -72,7 +72,7 @@ app.get("/health", (req, res) => {
 });
 
 // ==========================================
-//  SECURITY MIDDLEWARE
+//   SECURITY MIDDLEWARE
 // ==========================================
 const requireAuth = async (req, res, next) => {
     try {
@@ -120,7 +120,7 @@ const ProfileUpdateSchema = z.object({
 });
 
 // ==========================================
-//  USER PROFILE & MEASUREMENTS
+//   USER PROFILE & MEASUREMENTS
 // ==========================================
 
 app.get("/api/user/profile", async (req, res, next) => {
@@ -166,7 +166,7 @@ app.post("/api/user/profile", async (req, res, next) => {
 });
 
 // ==========================================
-//  STUDIO POLISH 
+//   STUDIO POLISH 
 // ==========================================
 app.post("/api/remove-bg", async (req, res, next) => {
   try {
@@ -175,13 +175,9 @@ app.post("/api/remove-bg", async (req, res, next) => {
 
     const base64Data = cleanBase64(image);
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); 
-
     try {
         const bgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
           method: 'POST',
-          signal: controller.signal,
           headers: { 
             'X-Api-Key': process.env.REMOVE_BG_API_KEY,
             'Content-Type': 'application/json',
@@ -189,13 +185,11 @@ app.post("/api/remove-bg", async (req, res, next) => {
           },
           body: JSON.stringify({ image_file_b64: base64Data, size: 'preview' })
         });
-        clearTimeout(timeoutId);
 
         if (!bgRes.ok) throw new Error("RemoveBG limit reached or request failed.");
         const data = await bgRes.json();
         return res.json({ image: `data:image/png;base64,${data.data.result_b64}` });
     } catch (bgError) {
-        clearTimeout(timeoutId);
         console.warn("[RemoveBG Warning] Falling back to original image:", bgError.message);
         return res.json({ image: `data:image/jpeg;base64,${base64Data}` });
     }
@@ -205,7 +199,7 @@ app.post("/api/remove-bg", async (req, res, next) => {
 });
 
 // ==========================================
-//  AUTO-TAGGING & CARE TAG
+//   AUTO-TAGGING & CARE TAG
 // ==========================================
 app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
   try {
@@ -222,8 +216,6 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
       seasonality: z.enum(["Summer", "Winter", "All-Season", "Fall/Spring"]),
       fabric_weight_category: z.enum(["Heavyweight", "Midweight", "Lightweight", "Tropical"]),
       drape_index: z.number().min(1).max(10).describe("1 = Stiff/Structured, 10 = Flowing/Unstructured"),
-      wrinkle_resistance: z.number().min(1).max(10).describe("1 = Wrinkles easily (Linen), 10 = Highly wrinkle-resistant (Synthetics/Wool blends)"),
-      stretch_factor: z.enum(["None", "Low", "Medium", "High"]),
       estimated_lifespan_wears: z.number().describe("Estimated wears before needing replacement")
     });
 
@@ -235,7 +227,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
             { 
               role: "user", 
               content: [
-                { type: "text", text: "Analyze this garment. Identify its visual and material properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
+                { type: "text", text: "Analyze this garment. Identify its visual properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
                 { type: "image", image: imageBuffer } 
               ] 
             }
@@ -248,7 +240,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
         res.json({ success: true, tags: {
             primary_color: "Unknown", secondary_color: null, pattern: "Solid",
             seasonality: "All-Season", fabric_weight_category: "Midweight",
-            drape_index: 5, wrinkle_resistance: 5, stretch_factor: "None", estimated_lifespan_wears: 100
+            drape_index: 5, estimated_lifespan_wears: 100
         }});
     }
   } catch (error) {
@@ -297,7 +289,7 @@ app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
 });
 
 // ==========================================
-//  GHOST SIMULATION (ANCHOR PIECE CURATOR)
+//   GHOST SIMULATION (ANCHOR PIECE CURATOR)
 // ==========================================
 app.post("/api/designer/ghost-simulation", async (req, res, next) => {
   try {
@@ -364,7 +356,7 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 });
 
 // ==========================================
-//  CHRONOS & VALET 
+//   CHRONOS & VALET 
 // ==========================================
 app.get("/api/analytics/chronos", async (req, res, next) => {
   try {
@@ -472,74 +464,8 @@ app.post("/api/ledger/reset", async (req, res, next) => {
 });
 
 // ==========================================
-//  CORE AI STYLING ENGINE (CHAT)
+//   CORE AI STYLING ENGINE (CHAT)
 // ==========================================
-
-// 1. Zod Schemas to enforce JSON structures mathematically
-const FitSchema = z.object({
-  score: z.number(),
-  tier: z.string(),
-  verdict: z.string(),
-  archetype: z.string(),
-  fit_anatomy: z.object({
-    shoulders_and_chest: z.array(z.string()),
-    waist_and_torso: z.array(z.string()),
-    legs_and_hem: z.array(z.string())
-  }),
-  alteration_blueprint: z.array(z.string()),
-  missing_pieces: z.array(z.string())
-});
-
-const TravelCuratorSchema = z.object({
-  score: z.number(),
-  tier: z.string(),
-  verdict: z.string(),
-  archetype: z.string(),
-  transit_outfit: z.object({
-      description: z.string(),
-      anatomy: z.object({
-          top_id: z.string(),
-          bottom_id: z.string(),
-          footwear_id: z.string(),
-          layer_id: z.string().nullable().optional()
-      })
-  }),
-  capsule_roster: z.array(z.string()),
-  outfit_combinations: z.array(z.object({
-      name: z.string(),
-      reasoning: z.string(),
-      anatomy: z.object({
-          top_id: z.string(),
-          bottom_id: z.string(),
-          footwear_id: z.string(),
-          layer_id: z.string().nullable().optional()
-      })
-  })),
-  styling_notes: z.array(z.string()),
-  missing_pieces: z.array(z.string()),
-  acquisition_list: z.array(z.any()).optional()
-});
-
-const DefaultStylingSchema = z.object({
-  score: z.number(),
-  tier: z.string(),
-  verdict: z.string(),
-  archetype: z.string(),
-  breakdown: z.object({ color: z.number(), occasion: z.number(), fit: z.number(), cohesion: z.number(), presence: z.number() }).optional(),
-  styling_notes: z.array(z.string()).optional(),
-  outfit_combinations: z.array(z.object({
-      name: z.string(),
-      reasoning: z.string(),
-      item_ids: z.array(z.string())
-  })),
-  what_works: z.array(z.string()).optional(),
-  recommendations: z.array(z.string()).optional(),
-  missing_pieces: z.array(z.string()).optional(),
-  acquisition_list: z.array(z.object({
-      item: z.string(), priority: z.string(), reasoning: z.string()
-  })).optional()
-});
-
 app.post("/api/chat", async (req, res, next) => {
   const reqId = crypto.randomUUID();
   console.log(`[${reqId}] Incoming ${req.body.mode} request from User: ${req.user.id}`);
@@ -575,59 +501,74 @@ app.post("/api/chat", async (req, res, next) => {
     
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
         const { data: vaultItems } = await req.supabase
-            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern, drape_index, wrinkle_resistance, stretch_factor")
-            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(100);
-        
-        if (vaultItems && vaultItems.length > 0) {
-            const optimizedVault = vaultItems.map(({ image_url, ...keepData }) => keepData);
-            vaultContext = JSON.stringify(optimizedVault);
-        }
+            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
+            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
+        if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // Dynamic schema selection
-    let activeSchema;
-    let modeSpecificInstructions = "";
-
+    let dynamicJSONSchema = "";
     if (data.mode === 'fit') {
-        activeSchema = FitSchema;
-    } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-        activeSchema = TravelCuratorSchema;
-        modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX V4.0:
-    1. CAPSULE DIVERSITY & PACING: You MUST populate the 'capsule_roster' with AT LEAST 3 distinct bottoms from the Vault. Do not repeat the exact same bottom across consecutive daytime outfits.
-    2. SUITCASE ECONOMICS (FOOTWEAR): Select a MAXIMUM of 3 distinct pairs of shoes from the Vault for the entire trip and intelligently re-utilize them.
-    3. SARTORIAL MAPPING (CRITICAL RULES):
-       - IF Bottom is 'Shorts' -> Footwear MUST BE 'Sandals', 'Sneakers', or 'Loafers'.
-       - IF Footwear is 'Boots' -> Bottom MUST BE 'Pants', 'Denim', or 'Trousers'.
-       - IF Occasion is 'Dinner' or 'Evening' -> Bottom MUST BE 'Pants' AND Footwear MUST BE 'Oxfords', 'Loafers', or formal.
-       - IF Occasion is 'Transit' -> Bottom MUST BE 'Pants' or 'Joggers' (Never shorts) AND Top MUST BE soft/stretch (Never stiff collars).
-    4. ANATOMICAL COMPLETENESS: For EVERY outfit generated, you MUST provide EXACT string IDs from the Available Wardrobe JSON for 'top_id', 'bottom_id', and 'footwear_id'.`;
+      dynamicJSONSchema = `{
+        "score": 85,
+        "tier": "Refined",
+        "verdict": "A brief summary of how the current silhouette and proportions look.",
+        "archetype": "The Executive",
+        "fit_anatomy": {
+          "shoulders_and_chest": ["Analyze shoulder seam placement", "Additional chest note"],
+          "waist_and_torso": ["Analyze waist suppression", "Additional torso note"],
+          "legs_and_hem": ["Analyze trouser break", "Additional leg note"]
+        },
+        "alteration_blueprint": ["Take in waist 1.5 inches", "Specific tailor instruction 2"],
+        "missing_pieces": ["A piece that would improve this silhouette"]
+      }`;
     } else {
-        activeSchema = DefaultStylingSchema;
-        if (data.mode === 'match_vibe') {
-            modeSpecificInstructions = `
-        MATCH MY VIBE DIRECTIVE: The provided image is the partner. Do NOT critique the partner's fit. 
-        1. Extract the partner's color palette, formality, and core aesthetic. 
-        2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe'. 
-        3. CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the JSON into the "item_ids" array.
-        4. Detail the color matching theory used.`;
-        } else if (data.mode === 'office_curation') {
-            modeSpecificInstructions = `
-        OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
-        CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
-        } else if (data.mode === 'acquisition_board') {
-            modeSpecificInstructions = `
-        ACQUISITION BOARD DIRECTIVE: You MUST analyze the user's Available Wardrobe and identify EXACTLY 5 distinct items they need to buy to elevate their style. 
-        - 2 items MUST be assigned "High" priority.
-        - 3 items MUST be assigned "Medium" priority.
-        
-        CRITICAL ANTI-DUPLICATION RULE: You MUST rigorously cross-reference the Available Wardrobe JSON. DO NOT recommend items they already own. 
-        - If they own "Bottoms" in Khaki, Navy, Grey, or Beige, DO NOT recommend chinos, trousers, or pants in those colors. 
-        - If they own a specific color/style of jacket, do not recommend it again. 
-        Look for ACTUAL gaps in their wardrobe (e.g., missing footwear, missing layering pieces, missing formal wear) and recommend those instead.
-        
-        Your 'acquisition_list' array MUST contain EXACTLY 5 complete objects representing their Top 5 smartest shopping priorities.`;
-        }
+      dynamicJSONSchema = `{
+        "score": 90,
+        "tier": "Elite",
+        "verdict": "A brief summary of the look.",
+        "archetype": "The Executive",
+        "breakdown": { "color": 18, "occasion": 18, "fit": 18, "cohesion": 18, "presence": 18 },
+        "styling_notes": ["Note 1", "Note 2"],
+        "outfit_combinations": [
+          { "name": "Day 1 Look", "reasoning": "Why this works", "item_ids": ["exact_id_from_vault", "exact_id_from_vault_2"] }
+        ],
+        "what_works": ["Strength 1"],
+        "recommendations": ["Upgrade 1"],
+        "missing_pieces": ["Gap 1"],
+        "acquisition_list": [
+          { "item": "Item Name", "priority": "High", "reasoning": "Why" }
+        ]
+      }`;
+    }
+
+    let modeSpecificInstructions = "";
+    if (data.mode === 'match_vibe') {
+        modeSpecificInstructions = `
+    MATCH MY VIBE DIRECTIVE: The provided image is the partner. Do NOT critique the partner's fit. 
+    1. Extract the partner's color palette, formality, and core aesthetic. 
+    2. Generate highly coordinated outfit options for the user STRICTLY from the 'Available Wardrobe'. 
+    3. CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the JSON into the "item_ids" array.
+    4. Detail the color matching theory used.`;
+    } else if (data.mode === 'office_curation') {
+        modeSpecificInstructions = `
+    OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
+    CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
+    } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
+        modeSpecificInstructions = `
+    TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.
+    CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
+    } else if (data.mode === 'acquisition_board') {
+        modeSpecificInstructions = `
+    ACQUISITION BOARD DIRECTIVE: You MUST analyze the user's Available Wardrobe and identify EXACTLY 5 distinct items they need to buy to elevate their style. 
+    - 2 items MUST be assigned "High" priority.
+    - 3 items MUST be assigned "Medium" priority.
+    
+    CRITICAL ANTI-DUPLICATION RULE: You MUST rigorously cross-reference the Available Wardrobe JSON. DO NOT recommend items they already own. 
+    - If they own "Bottoms" in Khaki, Navy, Grey, or Beige, DO NOT recommend chinos, trousers, or pants in those colors. 
+    - If they own a specific color/style of jacket, do not recommend it again. 
+    Look for ACTUAL gaps in their wardrobe (e.g., missing footwear, missing layering pieces, missing formal wear) and recommend those instead.
+    
+    Your 'acquisition_list' array MUST contain EXACTLY 5 complete objects representing their Top 5 smartest shopping priorities.`;
     }
 
     let prefsContext = "";
@@ -657,7 +598,9 @@ app.post("/api/chat", async (req, res, next) => {
     CRITICAL DIRECTIVES:
     1. Ignore human features in the photo. Focus on clothing and geometry. 
     2. YOU MUST CALCULATE REAL SCORES (0-100).
-    3. TIER CLASSIFICATION: 0-59="Baseline", 60-69="Functional", 70-79="Intentional", 80-89="Refined", 90-100="Elite".`;
+    3. TIER CLASSIFICATION: 0-59="Baseline", 60-69="Functional", 70-79="Intentional", 80-89="Refined", 90-100="Elite".
+    4. OUTPUT ONLY VALID PARSABLE JSON. NO MARKDOWN. NO HTML. PERFECTLY MATCH THIS STRUCTURE:
+    ${dynamicJSONSchema}`;
 
     const messages = [{ role: "system", content: systemPrompt }];
     
@@ -674,45 +617,61 @@ app.post("/api/chat", async (req, res, next) => {
         messages.push({ role: "user", content: `Please execute styling core. Notes: ${data.notes || 'No notes'}` });
     }
 
+    let fullResponse = "";
     try {
-        // Architecture Upgrade: streamObject replaces streamText
-        const result = await streamObject({ 
+        const result = await streamText({ 
             model: aiSdkOpenAi("gpt-4o"), 
-            schema: activeSchema,
             messages: messages, 
             temperature: 0.3 
         });
 
+        // ==========================================
+        //  CRITICAL FIX: PRODUCTION STREAMING HEADERS
+        // ==========================================
         res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Transfer-Encoding', 'chunked');
-        res.setHeader('Cache-Control', 'no-transform, no-cache'); 
+        res.setHeader('Cache-Control', 'no-transform, no-cache'); // Vital to bypass proxy buffering (e.g., Vercel/Cloudflare)
         res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders(); 
+        res.flushHeaders(); // Force headers to dispatch immediately
 
-        // Stream raw JSON text chunks perfectly to the client
         for await (const chunk of result.textStream) {
+            fullResponse += chunk;
             res.write(chunk);
         }
         res.end();
-
-        // SDK mathematically parses and resolves the final structured object.
-        const finalObject = await result.object;
-
-        await req.supabase.from("wardrobe_analyses").update({ 
-            full_analysis: finalObject, 
-            score: finalObject.score || null, 
-            tier: finalObject.tier || null, 
-            verdict: finalObject.verdict || "Analysis Complete"
-        }).eq("id", reqId);
-
-    } catch (aiError) {
-        console.error(`[${reqId}] OpenAI Generation/Parsing Failure:`, aiError.message);
+    } catch (streamError) {
+        console.error(`[${reqId}] OpenAI Stream Failure:`, streamError.message);
         if (!res.headersSent) {
-            return res.status(502).json({ error: "AI Engine connection dropped or validation failed." });
+            return res.status(502).json({ error: "AI Engine connection dropped. Please try again." });
         } else {
             res.end(); 
             return;
         }
+    }
+
+    try {
+        // ==========================================
+        //  CRITICAL FIX: AI HALLUCINATION DEFENSE
+        // ==========================================
+        let cleanJson = fullResponse.trim();
+        // gpt-4o will often wrap JSON in markdown despite our strict prompt. Strip it.
+        cleanJson = cleanJson.replace(/^```json/i, '').replace(/```$/i, '').trim();
+        
+        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            cleanJson = jsonMatch[0];
+        }
+        
+        const parsedJson = JSON.parse(cleanJson);
+        await req.supabase.from("wardrobe_analyses").update({ 
+            full_analysis: parsedJson, 
+            score: parsedJson.score || null, 
+            tier: parsedJson.tier || null, 
+            verdict: parsedJson.verdict || "Analysis Complete"
+        }).eq("id", reqId);
+    } catch (e) {
+        console.error(`[${reqId}] Failed to parse/save final JSON state. Raw AI text was invalid JSON.`, e.message);
+        // We log it but do not crash the app, the frontend has already streamed what it could.
     }
 
   } catch (err) { 
