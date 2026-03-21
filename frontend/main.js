@@ -1090,6 +1090,45 @@ async function readStreamingJsonResponse(response) {
   const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
   if (jsonMatch) cleanJson = jsonMatch[0];
 
+  // MATHEMATICAL BRACE/BRACKET COUNTER & AUTO-CLOSER
+  let stack = [];
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < cleanJson.length; i++) {
+      const char = cleanJson[i];
+      if (escapeNext) {
+          escapeNext = false;
+          continue;
+      }
+      if (char === '\\') {
+          escapeNext = true;
+          continue;
+      }
+      if (char === '"') {
+          inString = !inString;
+          continue;
+      }
+      if (!inString) {
+          if (char === '{' || char === '[') {
+              stack.push(char);
+          } else if (char === '}') {
+              if (stack[stack.length - 1] === '{') stack.pop();
+          } else if (char === ']') {
+              if (stack[stack.length - 1] === '[') stack.pop();
+          }
+      }
+  }
+
+  cleanJson = cleanJson.replace(/,\s*$/, ''); // Remove trailing commas before auto-closing
+  if (inString) cleanJson += '"';
+
+  while (stack.length > 0) {
+      const last = stack.pop();
+      if (last === '{') cleanJson += '}';
+      if (last === '[') cleanJson += ']';
+  }
+
   try {
       return JSON.parse(cleanJson);
   } catch (err) {
@@ -1103,10 +1142,26 @@ function renderList(label, items, icon = '•') {
   return `<div class="card"><div class="label">${escapeHtml(label)}</div>${items.map((item) => `<span class="list-item">${escapeHtml(icon)} ${escapeHtml(item)}</span>`).join('')}</div>`;
 }
 
+// ==========================================
+//  CRITICAL UPGRADE: SCHEMA MAPPER UPDATE
+// ==========================================
 function resolveOutfitImages(outfitObj) {
   const validUrls = [];
   const validIds = [];
-  const returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
+  
+  // Extract from V4 anatomy object if present, fallback to legacy arrays
+  let returnedItems = [];
+  if (outfitObj.anatomy) {
+    returnedItems = [
+      outfitObj.anatomy.top_id,
+      outfitObj.anatomy.bottom_id,
+      outfitObj.anatomy.footwear_id,
+      outfitObj.anatomy.outerwear_id,
+      outfitObj.anatomy.accessory_id
+    ].filter(Boolean); // removes null/undefined entries
+  } else {
+    returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
+  }
 
   if (returnedItems.length === 0 && outfitObj.reasoning) {
     const text = String(outfitObj.reasoning).toLowerCase();

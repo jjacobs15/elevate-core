@@ -675,35 +675,37 @@ app.post("/api/chat", async (req, res, next) => {
     }
 
     try {
-        // Architecture Upgrade: streamObject replaces streamText
         const result = await streamObject({ 
             model: aiSdkOpenAi("gpt-4o"), 
             schema: activeSchema,
             messages: messages, 
-            temperature: 0.3 
+            temperature: 0.3,
+            maxTokens: 8192 // <--- CRITICAL FIX: Ensures massive vacation JSONs don't get truncated
         });
 
         res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Transfer-Encoding', 'chunked');
         res.setHeader('Cache-Control', 'no-transform, no-cache'); 
         res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no'); // <--- CRITICAL FIX: Stops reverse proxies from buffering chunks
         res.flushHeaders(); 
 
-        // Stream raw JSON text chunks perfectly to the client
         for await (const chunk of result.textStream) {
             res.write(chunk);
         }
         res.end();
 
-        // SDK mathematically parses and resolves the final structured object.
-        const finalObject = await result.object;
-
-        await req.supabase.from("wardrobe_analyses").update({ 
-            full_analysis: finalObject, 
-            score: finalObject.score || null, 
-            tier: finalObject.tier || null, 
-            verdict: finalObject.verdict || "Analysis Complete"
-        }).eq("id", reqId);
+        try {
+             const finalObject = await result.object;
+             await req.supabase.from("wardrobe_analyses").update({ 
+                 full_analysis: finalObject, 
+                 score: finalObject.score || null, 
+                 tier: finalObject.tier || null, 
+                 verdict: finalObject.verdict || "Analysis Complete"
+             }).eq("id", reqId);
+        } catch (dbError) {
+             console.error(`[${reqId}] Stream finished but final object validation/DB save failed:`, dbError.message);
+        }
 
     } catch (aiError) {
         console.error(`[${reqId}] OpenAI Generation/Parsing Failure:`, aiError.message);
