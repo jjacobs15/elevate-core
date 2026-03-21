@@ -528,7 +528,7 @@ app.post("/api/chat", async (req, res, next) => {
         "missing_pieces": ["A piece that would improve this silhouette"]
       }`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-      // NEW: Specific travel schema forcing the Transit Outfit and Capsule Roster
+      // Specific travel schema forcing the Transit Outfit and Capsule Roster
       dynamicJSONSchema = `{
         "score": 90,
         "tier": "Elite",
@@ -579,13 +579,17 @@ app.post("/api/chat", async (req, res, next) => {
     OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-        // ARCHITECTURAL UPGRADE: The Comfort & Utility Matrix injected into styling core.
+        // ARCHITECTURAL UPGRADE: The Master Travel Matrix v2.0
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE - THE COMFORT & UTILITY MATRIX:
-    1. Transit Engineering: You MUST map out a distinct "transit_outfit" utilizing stretch fabrics, wrinkle-resistant materials, breathable layers, and highly practical footwear from the Vault.
-    2. The Capsule Multiplier: Curate a unified "capsule_roster". Maximize versatility. Prioritize items that can effortlessly transition from daytime exploration to upscale evening wear.
-    3. Climate & Comfort Intelligence: Cross-reference the destination's climate context. Strictly prioritize breathable, comfortable fabrics (e.g., lightweight cotton, linen) for warm climates, and strategic modular layering (merino wools, cardigans) for cold climates over rigid pieces.
-    4. Itinerary Mapping: Generate distinct outfit combinations for EACH day of the trip based on the itinerary duration in the notes. Do not stop at Day 1. 
+    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX:
+    1. Suitcase Economics (The Rule of Three): You MUST select EXACTLY 3 pairs of shoes for the entire capsule roster (1 pair worn in the transit_outfit, 2 pairs packed). You must meticulously re-utilize these exact 3 pairs across every daily itinerary. Map them logically: e.g., a comfortable transit/walking shoe, a versatile day shoe, and an elevated evening shoe.
+    2. Hyper-Contextual Calibration: Deeply analyze the destination, climate data, and trip notes (e.g., Cruise, Ski Trip, Business). 
+        - For Warm/Coastal/Cruise: Enforce a "Resort" or "Riviera" aesthetic. Prioritize linen, lightweight cottons, loafers, espadrilles, and clean sneakers. 
+        - For Cold/Urban: Enforce smart layering, structured wools, and appropriate weather footwear.
+    3. Sartorial Cohesion & Zero Faux Pas: STRICTLY FORBID aesthetic mismatches. NEVER pair heavy boots with shorts. NEVER pair athletic running shoes with tailored trousers or evening wear. Ensure color palettes coordinate flawlessly using tonal or complementary theory.
+    4. Transit Engineering: The "transit_outfit" must balance long-haul comfort with arrival elegance. Use stretch fabrics, but keep the silhouette sharp and presentable for immediate hotel check-in or dining.
+    5. Strategic Gaps (Missing Pieces): When identifying "missing_pieces", prioritize destination-specific luxury essentials missing from the Vault. E.g., if traveling to the Mediterranean, explicitly recommend linen trousers, a luxury leather timepiece, or polarized resort eyewear to complete the aesthetic.
+    6. Dynamic Itinerary Mapping: Generate distinct outfit combinations for EACH day of the trip based on the itinerary duration. Reuse individual pieces intelligently, but avoid repeating the exact same full outfit.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
