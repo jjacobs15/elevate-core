@@ -56,7 +56,7 @@ app.use(cors({
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30, 
+  max: 100, 
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "The atelier is currently at capacity. Please wait a moment." }
@@ -175,9 +175,13 @@ app.post("/api/remove-bg", async (req, res, next) => {
 
     const base64Data = cleanBase64(image);
     
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); 
+
     try {
         const bgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 
             'X-Api-Key': process.env.REMOVE_BG_API_KEY,
             'Content-Type': 'application/json',
@@ -185,11 +189,13 @@ app.post("/api/remove-bg", async (req, res, next) => {
           },
           body: JSON.stringify({ image_file_b64: base64Data, size: 'preview' })
         });
+        clearTimeout(timeoutId);
 
         if (!bgRes.ok) throw new Error("RemoveBG limit reached or request failed.");
         const data = await bgRes.json();
         return res.json({ image: `data:image/png;base64,${data.data.result_b64}` });
     } catch (bgError) {
+        clearTimeout(timeoutId);
         console.warn("[RemoveBG Warning] Falling back to original image:", bgError.message);
         return res.json({ image: `data:image/jpeg;base64,${base64Data}` });
     }
@@ -501,16 +507,17 @@ app.post("/api/chat", async (req, res, next) => {
 
     let vaultContext = "No wardrobe items available.";
     
-    // Auto-fetch vault context if necessary
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
-        // Includes newly tagged material properties to aid the Master Planner
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern, drape_index, wrinkle_resistance, stretch_factor")
-            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(100); // Upped limit to ensure full casual wardrobe is seen
-        if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(100);
+        
+        if (vaultItems && vaultItems.length > 0) {
+            const optimizedVault = vaultItems.map(({ image_url, ...keepData }) => keepData);
+            vaultContext = JSON.stringify(optimizedVault);
+        }
     } 
 
-    // --- ARCHITECTURAL UPGRADE: DYNAMIC SCHEMAS ---
     let dynamicJSONSchema = "";
     if (data.mode === 'fit') {
       dynamicJSONSchema = `{
@@ -527,7 +534,6 @@ app.post("/api/chat", async (req, res, next) => {
         "missing_pieces": ["A piece that would improve this silhouette"]
       }`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-      // Specific travel schema forcing the Transit Outfit and Capsule Roster
       dynamicJSONSchema = `{
         "score": 90,
         "tier": "Elite",
@@ -578,15 +584,14 @@ app.post("/api/chat", async (req, res, next) => {
     OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-        // ARCHITECTURAL UPGRADE: The True Practical Travel Matrix
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE - THE PRACTICAL TRAVEL MATRIX:
-    1. Suitcase Economics (The Rule of Three): You MUST select EXACTLY 3 pairs of shoes for the entire capsule roster (1 pair worn in the transit_outfit, 2 pairs packed). You must meticulously re-utilize these exact 3 pairs across every daily itinerary. Map them logically: e.g., a comfortable transit/walking shoe, a versatile day shoe, and an elevated evening shoe.
-    2. Long-Haul Transit Protocol: Define the 'transit_outfit' by MAXIMUM PHYSICAL COMFORT. Collared button-up dress shirts are explicitly DISALLOWED for transit. You MUST utilize soft T-shirts or technical base layers paired with quarter-zips or pullovers for layering. 
-    3. Footwear & Formality Constraint Check: Strictly validate outfit combinations against the available footwear capsule. Identify major aesthetic mismatches. DO NOT suggest structured dress shirts/button-ups paired with Birkenstocks/sandals or athletic white sneakers for non-beach settings. If an evening requires an "elegant" look but no appropriate dress shoes exist in the vault, note this as a critical "Wardrobe Gap" rather than generating a clashing outfit.
-    4. Technical Wardrobe Indexing: For daytime activities defined as "Beach," "Sightseeing," "Exploration," or "Tours," aggressively prioritize uploaded T-shirts, activity-specific shirts, and pullovers over structured collared shirts. Default to technical, casual, and comfort fabrics for all excursions.
-    5. Capsule Logic Adjustment: Lean heavily into a "True Casual" capsule for vacations. Ensure the generated combination roster uses distinct casual/technical shirts before repeating any collar shirt options for daytime. Reserve button-ups strictly for designated dinners or upscale evenings.
-    6. Strategic Gaps (Missing Pieces): When identifying "missing_pieces", prioritize destination-specific luxury essentials missing from the Vault. E.g., if traveling to the Mediterranean, explicitly recommend linen trousers, a luxury leather timepiece, or polarized resort eyewear to complete the aesthetic.
+    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX:
+    1. Anatomical Completeness (CRITICAL RULE): EVERY single outfit generated (including the 'transit_outfit' and ALL daily combinations) MUST contain EXACTLY ONE 'Top', EXACTLY ONE 'Bottom' (Pants or Shorts), and EXACTLY ONE pair of 'Footwear'. You may optionally add ONE 'Outerwear' or layering piece. NEVER generate an outfit missing a Bottom. NEVER generate an outfit missing Footwear.
+    2. Suitcase Economics (The Rule of Three): Select a MAXIMUM of 3 distinct pairs of shoes from the Vault for the entire trip. You MUST intelligently re-utilize these exact 3 pairs across all days. (e.g., 1 travel/walking sneaker, 1 casual/beach shoe, 1 elevated evening shoe). Re-utilize 'Bottoms' across multiple days to mimic realistic packing.
+    3. Footwear Formality & Climate Guardrails: Cross-reference footwear against the climate and occasion. STRICTLY FORBIDDEN: Do NOT pair heavy boots with shorts or warm-weather excursions. Do NOT pair casual sandals/Birkenstocks with evening/dress wear. 
+    4. Long-Haul Transit Protocol: The 'transit_outfit' MUST prioritize physical comfort. Use soft T-shirts, stretch bottoms, and technical layers (pullovers/hoodies). STRICTLY FORBIDDEN: Stiff collared button-up shirts for transit.
+    5. Technical vs. Tailored Pacing: For daytime activities (Sightseeing, Tours, Beach), aggressively prioritize technical gear, T-shirts, and breathable casual wear from the Vault. Strictly reserve tailored/collared button-up shirts for designated dinners or upscale evenings.
+    6. Strategic Gaps (Missing Pieces): Recommend 2 destination-specific luxury essentials actually missing from the generated capsule (e.g., a specific linen trouser, a tailored jacket, or luxury sunglasses).
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
@@ -656,14 +661,11 @@ app.post("/api/chat", async (req, res, next) => {
             temperature: 0.3 
         });
 
-        // ==========================================
-        //  CRITICAL FIX: PRODUCTION STREAMING HEADERS
-        // ==========================================
         res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Transfer-Encoding', 'chunked');
-        res.setHeader('Cache-Control', 'no-transform, no-cache'); // Vital to bypass proxy buffering (e.g., Vercel/Cloudflare)
+        res.setHeader('Cache-Control', 'no-transform, no-cache'); 
         res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders(); // Force headers to dispatch immediately
+        res.flushHeaders(); 
 
         for await (const chunk of result.textStream) {
             fullResponse += chunk;
@@ -682,10 +684,9 @@ app.post("/api/chat", async (req, res, next) => {
 
     try {
         // ==========================================
-        //  CRITICAL FIX: AI HALLUCINATION DEFENSE
+        //  BULLETPROOF FIX: Safely parse JSON blocks
         // ==========================================
         let cleanJson = fullResponse.trim();
-        // gpt-4o will often wrap JSON in markdown despite our strict prompt. Strip it.
         cleanJson = cleanJson.replace(/^```json/i, '').replace(/```$/i, '').trim();
         
         const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
@@ -693,7 +694,21 @@ app.post("/api/chat", async (req, res, next) => {
             cleanJson = jsonMatch[0];
         }
         
-        const parsedJson = JSON.parse(cleanJson);
+        let parsedJson;
+        try {
+            parsedJson = JSON.parse(cleanJson);
+        } catch (parseError) {
+            // Failsafe if the AI hallucinates bad characters at the end of the stream
+            console.warn(`[${reqId}] Strict JSON parse failed. Attempting recovery...`);
+            // Find the last closing brace to chop off trailed hallucinated text
+            const lastBraceIndex = cleanJson.lastIndexOf('}');
+            if (lastBraceIndex !== -1) {
+                parsedJson = JSON.parse(cleanJson.substring(0, lastBraceIndex + 1));
+            } else {
+                throw parseError; // Re-throw if totally unrecoverable
+            }
+        }
+
         await req.supabase.from("wardrobe_analyses").update({ 
             full_analysis: parsedJson, 
             score: parsedJson.score || null, 
@@ -702,7 +717,6 @@ app.post("/api/chat", async (req, res, next) => {
         }).eq("id", reqId);
     } catch (e) {
         console.error(`[${reqId}] Failed to parse/save final JSON state. Raw AI text was invalid JSON.`, e.message);
-        // We log it but do not crash the app, the frontend has already streamed what it could.
     }
 
   } catch (err) { 
