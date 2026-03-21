@@ -9,6 +9,7 @@
 // - Added "Match My Vibe" (match_vibe) integration
 // - INTEGRATED STYLE DNA (Global User Preferences) via unified /api/user/profile
 // - ADDED: Auto-save debounce logic for Master's Ledger (Silhouette ID)
+// - CRITICAL UPGRADE: Fortified Stream Consumer (Infinite Loop Prevention) & AI JSON extraction
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -1051,21 +1052,56 @@ function buildAnalysisPayload({ image, mode, climateData }) {
   };
 }
 
+// ==========================================
+//   CRITICAL UPGRADE: FAILSAFE STREAM CONSUMER
+// ==========================================
 async function readStreamingJsonResponse(response) {
   if (!response.body) throw new Error('Empty streaming response.');
 
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8");
   let fullText = '';
+  
+  // Guard against proxy-induced infinite loops (e.g., hanging keep-alive pings)
+  let failsafeCounter = 0; 
+  const MAX_CHUNKS = 10000; 
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    fullText += decoder.decode(value, { stream: true });
+  try {
+      while (true) {
+          failsafeCounter++;
+          if (failsafeCounter > MAX_CHUNKS) throw new Error("Stream duration exceeded maximum safe limits.");
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          if (value) {
+              fullText += decoder.decode(value, { stream: true });
+              
+              // UX Polish: Pulse loading text to indicate active computation
+              const statusEl = document.getElementById('statusText');
+              if (statusEl && failsafeCounter % 3 === 0) {
+                  statusEl.textContent = statusEl.textContent.endsWith('...') 
+                      ? statusEl.textContent.replace('...', '.') 
+                      : statusEl.textContent + '.';
+              }
+          }
+      }
+      fullText += decoder.decode(); // Flush remaining
+  } finally {
+      reader.releaseLock();
   }
 
-  const cleanJson = fullText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(cleanJson);
+  // Eradicate AI Markdown Hallucinations before parsing
+  let cleanJson = fullText.trim();
+  const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+  if (jsonMatch) cleanJson = jsonMatch[0];
+
+  try {
+      return JSON.parse(cleanJson);
+  } catch (err) {
+      console.error("[EleVate Parse Error] Invalid JSON payload received:", cleanJson);
+      throw new Error("The Master Stylist experienced a structural fault. Please request a new evaluation.");
+  }
 }
 
 function renderList(label, items, icon = '•') {
@@ -2047,10 +2083,7 @@ function bindEvents() {
       target.setAttribute('disabled', 'disabled');
       try {
         const ids = JSON.parse(target.getAttribute('data-item-ids') || '[]');
-        await apiFetch('/api/ledger/nightstand-log', {
-          method: 'POST',
-          body: { itemIds: ids },
-        });
+        await apiFetch('/api/ledger/nightstand-log', { method: 'POST', body: { itemIds: ids } });
         target.textContent = 'Outfit Logged ✓';
         target.style.borderColor = '#10B981';
         target.style.color = '#10B981';

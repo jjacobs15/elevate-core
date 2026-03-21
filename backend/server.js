@@ -625,8 +625,14 @@ app.post("/api/chat", async (req, res, next) => {
             temperature: 0.3 
         });
 
-        res.setHeader('Content-Type', 'application/json');
+        // ==========================================
+        //  CRITICAL FIX: PRODUCTION STREAMING HEADERS
+        // ==========================================
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('Cache-Control', 'no-transform, no-cache'); // Vital to bypass proxy buffering (e.g., Vercel/Cloudflare)
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders(); // Force headers to dispatch immediately
 
         for await (const chunk of result.textStream) {
             fullResponse += chunk;
@@ -644,7 +650,13 @@ app.post("/api/chat", async (req, res, next) => {
     }
 
     try {
+        // ==========================================
+        //  CRITICAL FIX: AI HALLUCINATION DEFENSE
+        // ==========================================
         let cleanJson = fullResponse.trim();
+        // gpt-4o will often wrap JSON in markdown despite our strict prompt. Strip it.
+        cleanJson = cleanJson.replace(/^```json/i, '').replace(/```$/i, '').trim();
+        
         const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             cleanJson = jsonMatch[0];
@@ -658,7 +670,8 @@ app.post("/api/chat", async (req, res, next) => {
             verdict: parsedJson.verdict || "Analysis Complete"
         }).eq("id", reqId);
     } catch (e) {
-        console.error(`[${reqId}] Failed to parse/save final JSON state. Bad AI formatting.`, e.message);
+        console.error(`[${reqId}] Failed to parse/save final JSON state. Raw AI text was invalid JSON.`, e.message);
+        // We log it but do not crash the app, the frontend has already streamed what it could.
     }
 
   } catch (err) { 
