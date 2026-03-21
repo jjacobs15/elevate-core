@@ -2,15 +2,14 @@
 // Notes:
 // - Uses safe session retrieval for every authenticated call
 // - Centralizes DOM access, request handling, and error handling
-// - Removed storage clearing during OAuth
+// - Removes storage clearing during OAuth
 // - Avoids duplicate event binding
 // - Adds config validation and guarded initialization
 // - Keeps the single-file structure for easier drop-in replacement
 // - Added "Match My Vibe" (match_vibe) integration
 // - INTEGRATED STYLE DNA (Global User Preferences) via unified /api/user/profile
-// - Auto-save debounce logic for Master's Ledger
-// - CRITICAL UPGRADE: Fortified Stream Consumer & AI JSON extraction
-// - ARCHITECTURAL UPGRADE: Travel Curator Comfort & Transit Outfit Rendering
+// - ADDED: Auto-save debounce logic for Master's Ledger (Silhouette ID)
+// - CRITICAL UPGRADE: Fortified Stream Consumer (Infinite Loop Prevention) & AI JSON extraction
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -58,7 +57,7 @@ const STATE = {
   profileListenersBound: false,
   initialized: false,
   userPreferences: { fits: [], brands: [], additional: [] },
-  activeVaultFilter: null 
+  activeVaultFilter: null // --- ADDED FILTER STATE ---
 };
 
 const CONSTANTS = {
@@ -230,6 +229,7 @@ function withTimeout(controller, ms) {
   return window.setTimeout(() => controller.abort(), ms);
 }
 
+// --- UTILITY: Debounce for auto-saving inputs ---
 function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
@@ -406,12 +406,14 @@ async function syncUserProfile() {
     const { profile } = await res.json();
     
     if (profile) {
+        // Hydrate inputs
         const m = profile.measurements || {};
         DOM.mChest.value = m.chest || '';
         DOM.mInseam.value = m.inseam || '';
         DOM.mWaist.value = m.waist || '';
         DOM.mHeight.value = m.height || '';
 
+        // Hydrate preferences
         if (profile.preferences) {
             STATE.userPreferences = profile.preferences;
             
@@ -437,8 +439,10 @@ async function syncUserProfile() {
     console.warn('Failed to load profile/preferences:', err.message);
   }
 
+  // Prevent duplicate listener bindings
   if (STATE.profileListenersBound) return;
 
+  // The actual save function
   const persistMeasurements = async () => {
     try {
       await apiFetch('/api/user/profile', {
@@ -458,8 +462,10 @@ async function syncUserProfile() {
     }
   };
 
+  // Debounce the save function so it waits 1 second after the user stops typing
   const debouncedSave = debounce(persistMeasurements, 1000);
 
+  // Bind to 'input' for real-time saving instead of waiting for 'change' (blur)
   [DOM.mChest, DOM.mInseam, DOM.mWaist, DOM.mHeight].forEach((input) => {
     if (input) input.addEventListener('input', debouncedSave);
   });
@@ -1047,7 +1053,7 @@ function buildAnalysisPayload({ image, mode, climateData }) {
 }
 
 // ==========================================
-//  CRITICAL UPGRADE: FAILSAFE STREAM CONSUMER
+//   CRITICAL UPGRADE: FAILSAFE STREAM CONSUMER
 // ==========================================
 async function readStreamingJsonResponse(response) {
   if (!response.body) throw new Error('Empty streaming response.');
@@ -1090,45 +1096,6 @@ async function readStreamingJsonResponse(response) {
   const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
   if (jsonMatch) cleanJson = jsonMatch[0];
 
-  // MATHEMATICAL BRACE/BRACKET COUNTER & AUTO-CLOSER
-  let stack = [];
-  let inString = false;
-  let escapeNext = false;
-
-  for (let i = 0; i < cleanJson.length; i++) {
-      const char = cleanJson[i];
-      if (escapeNext) {
-          escapeNext = false;
-          continue;
-      }
-      if (char === '\\') {
-          escapeNext = true;
-          continue;
-      }
-      if (char === '"') {
-          inString = !inString;
-          continue;
-      }
-      if (!inString) {
-          if (char === '{' || char === '[') {
-              stack.push(char);
-          } else if (char === '}') {
-              if (stack[stack.length - 1] === '{') stack.pop();
-          } else if (char === ']') {
-              if (stack[stack.length - 1] === '[') stack.pop();
-          }
-      }
-  }
-
-  cleanJson = cleanJson.replace(/,\s*$/, ''); // Remove trailing commas before auto-closing
-  if (inString) cleanJson += '"';
-
-  while (stack.length > 0) {
-      const last = stack.pop();
-      if (last === '{') cleanJson += '}';
-      if (last === '[') cleanJson += ']';
-  }
-
   try {
       return JSON.parse(cleanJson);
   } catch (err) {
@@ -1142,26 +1109,10 @@ function renderList(label, items, icon = '•') {
   return `<div class="card"><div class="label">${escapeHtml(label)}</div>${items.map((item) => `<span class="list-item">${escapeHtml(icon)} ${escapeHtml(item)}</span>`).join('')}</div>`;
 }
 
-// ==========================================
-//  CRITICAL UPGRADE: SCHEMA MAPPER UPDATE
-// ==========================================
 function resolveOutfitImages(outfitObj) {
   const validUrls = [];
   const validIds = [];
-  
-  // Extract from V4 anatomy object if present, fallback to legacy arrays
-  let returnedItems = [];
-  if (outfitObj.anatomy) {
-    returnedItems = [
-      outfitObj.anatomy.top_id,
-      outfitObj.anatomy.bottom_id,
-      outfitObj.anatomy.footwear_id,
-      outfitObj.anatomy.outerwear_id,
-      outfitObj.anatomy.accessory_id
-    ].filter(Boolean); // removes null/undefined entries
-  } else {
-    returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
-  }
+  const returnedItems = outfitObj.item_ids || outfitObj.item_urls || [];
 
   if (returnedItems.length === 0 && outfitObj.reasoning) {
     const text = String(outfitObj.reasoning).toLowerCase();
@@ -1249,42 +1200,6 @@ function generateHTMLFromData(data, displayMode) {
     html += `<div class="card"><div class="label">Sartorial Breakdown</div><div class="breakdown-grid">${createBar('Color', breakdown.color || 0)}${createBar('Occasion', breakdown.occasion || 0)}${createBar('Fit', breakdown.fit || 0)}${createBar('Cohesion', breakdown.cohesion || 0)}${createBar('Presence', breakdown.presence || 0)}</div></div>`;
   }
 
-  // --- ARCHITECTURAL UPGRADE: TRAVEL CAPSULE RENDERING ---
-  if (displayMode === 'travel_curator' || displayMode === 'work_trip_curator') {
-      
-      // 1. The Transit Outfit
-      if (data.transit_outfit) {
-        const { validUrls, validIds } = resolveOutfitImages(data.transit_outfit);
-        html += `
-          <div class="card" style="border-left: 3px solid #3b82f6; margin-bottom: 24px;">
-            <div class="label" style="color: #3b82f6;">✈️ The Transit Outfit</div>
-            <div style="font-size:12px; color:#cbd5e1; margin-bottom:12px;">${escapeHtml(data.transit_outfit.description || 'Optimized for comfort, stretch, and airport logistics.')}</div>
-            ${validUrls.length > 0 ? `
-              <div style="display:flex; gap:8px; overflow-x:auto;">
-                ${validUrls.map(url => `<img src="${escapeHtml(url)}" style="width:70px; height:90px; object-fit:cover; border-radius:2px; border:1px solid rgba(59, 130, 246, 0.3);" alt="Transit Item">`).join('')}
-              </div>
-            ` : ''}
-            ${validIds.length > 0 ? `<button class="action-btn js-log-nightstand" data-item-ids="${escapeHtml(JSON.stringify(validIds))}" style="border-color:rgba(59, 130, 246, 0.4); color:#60a5fa; margin-top:15px; width:100%;">Log Departure Wear</button>` : ''}
-          </div>
-        `;
-      }
-
-      // 2. The Capsule Roster (Packing List)
-      if (Array.isArray(data.capsule_roster) && data.capsule_roster.length > 0) {
-        const { validUrls } = resolveOutfitImages({ item_ids: data.capsule_roster });
-        if (validUrls.length > 0) {
-           html += `
-             <div class="card" style="margin-bottom: 32px;">
-               <div class="label">The Capsule Roster (Packing List)</div>
-               <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;">
-                 ${validUrls.map(url => `<img src="${escapeHtml(url)}" style="width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:2px; border:1px solid rgba(255,255,255,0.1);" alt="Capsule Item">`).join('')}
-               </div>
-             </div>
-           `;
-        }
-      }
-  }
-
   const multiDayModes = ['office_curation', 'travel_curator', 'work_trip_curator'];
   const singleDayModes = ['wardrobe_builder', 'morning_briefing', 'match_vibe'];
 
@@ -1294,10 +1209,10 @@ function generateHTMLFromData(data, displayMode) {
       if (multiDayModes.includes(displayMode)) {
         let label = 'Curated Itinerary';
         if (displayMode === 'office_curation') label = 'Weekly Office Rotation (5 Days)';
-        if (displayMode === 'travel_curator') label = 'Vacation Itinerary';
-        if (displayMode === 'work_trip_curator') label = 'Business Trip Itinerary';
+        if (displayMode === 'travel_curator') label = 'Vacation Capsule';
+        if (displayMode === 'work_trip_curator') label = 'Business Trip Capsule';
 
-        html += `<div class="label" style="margin-top:10px; margin-bottom:16px;">${escapeHtml(label)}</div>`;
+        html += `<div class="label" style="margin-top:30px; margin-bottom:16px;">${escapeHtml(label)}</div>`;
 
         data.outfit_combinations.forEach((outfit, index) => {
           const { validUrls, validIds } = resolveOutfitImages(outfit);
@@ -1726,8 +1641,6 @@ async function handleSaveGarment() {
       fabricData = {
         fabric_weight_category: tags.fabric_weight_category,
         drape_index: tags.drape_index,
-        wrinkle_resistance: tags.wrinkle_resistance, // INJECTED NEW DATA POINT
-        stretch_factor: tags.stretch_factor, // INJECTED NEW DATA POINT
         estimated_lifespan_wears: tags.estimated_lifespan_wears,
       };
     }
@@ -1808,7 +1721,7 @@ async function handleGhostSimulation() {
       body: {
         ghostItemImageBase64: base64Image,
         ghostItemDescription: DOM.ghostDesc.value.trim(),
-        userPreferences: STATE.userPreferences
+        userPreferences: STATE.userPreferences // INJECTED PREFERENCES
       },
     });
 
@@ -1861,7 +1774,7 @@ async function handleAcquisitionBoard() {
       method: 'POST',
       body: { 
           mode: 'acquisition_board',
-          userPreferences: STATE.userPreferences
+          userPreferences: STATE.userPreferences // INJECTED PREFERENCES
       },
     });
 
@@ -2090,6 +2003,7 @@ function bindEvents() {
     if (event.target === DOM.genericModal) closeGenericModal();
   });
 
+  // --- PREFERENCES UI EVENTS ---
   document.querySelectorAll('.chip').forEach(chip => {
     chip.addEventListener('click', (e) => {
       e.target.classList.toggle('active');
@@ -2118,16 +2032,17 @@ function bindEvents() {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
+    // --- VAULT FILTER LOGIC ---
     const filterBtn = target.closest('.filter-btn');
     if (filterBtn) {
         const category = filterBtn.getAttribute('data-filter-category');
         if (STATE.activeVaultFilter === category) {
-            STATE.activeVaultFilter = null; 
+            STATE.activeVaultFilter = null; // Toggle off if clicked again
         } else {
             STATE.activeVaultFilter = category;
         }
-        renderVaultDashboard(STATE.cachedVaultInventory); 
-        renderVaultItems(); 
+        renderVaultDashboard(STATE.cachedVaultInventory); // Re-render to update gold border
+        renderVaultItems(); // Re-render the visual feed
         return;
     }
 
@@ -2213,6 +2128,7 @@ initialize().catch((err) => {
   showCrash(err.message || String(err));
 });
 
+// Expose modal and click functions to the global window for HTML inline access
 window.openVaultItemDetail = openVaultItemDetail;
 window.openValetDashboard = openValetDashboard;
 window.closeGenericModal = closeGenericModal;
