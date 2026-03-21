@@ -209,7 +209,6 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
     const safeImage = cleanBase64(image);
     const imageBuffer = Buffer.from(safeImage, "base64");
 
-    // UPGRADED SCHEMA: Capturing travel-critical comfort data
     const TaggingSchema = z.object({
       primary_color: z.string().describe("The dominant color"),
       secondary_color: z.string().nullable().describe("The accent color, or null"),
@@ -507,7 +506,7 @@ app.post("/api/chat", async (req, res, next) => {
         // Includes newly tagged material properties to aid the Master Planner
         const { data: vaultItems } = await req.supabase
             .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern, drape_index, wrinkle_resistance, stretch_factor")
-            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
+            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(100); // Upped limit to ensure full casual wardrobe is seen
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
@@ -579,17 +578,15 @@ app.post("/api/chat", async (req, res, next) => {
     OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-        // ARCHITECTURAL UPGRADE: The Master Travel Matrix v2.0
+        // ARCHITECTURAL UPGRADE: The True Practical Travel Matrix
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE - THE MASTER TRAVEL MATRIX:
+    TRIP CURATOR DIRECTIVE - THE PRACTICAL TRAVEL MATRIX:
     1. Suitcase Economics (The Rule of Three): You MUST select EXACTLY 3 pairs of shoes for the entire capsule roster (1 pair worn in the transit_outfit, 2 pairs packed). You must meticulously re-utilize these exact 3 pairs across every daily itinerary. Map them logically: e.g., a comfortable transit/walking shoe, a versatile day shoe, and an elevated evening shoe.
-    2. Hyper-Contextual Calibration: Deeply analyze the destination, climate data, and trip notes (e.g., Cruise, Ski Trip, Business). 
-        - For Warm/Coastal/Cruise: Enforce a "Resort" or "Riviera" aesthetic. Prioritize linen, lightweight cottons, loafers, espadrilles, and clean sneakers. 
-        - For Cold/Urban: Enforce smart layering, structured wools, and appropriate weather footwear.
-    3. Sartorial Cohesion & Zero Faux Pas: STRICTLY FORBID aesthetic mismatches. NEVER pair heavy boots with shorts. NEVER pair athletic running shoes with tailored trousers or evening wear. Ensure color palettes coordinate flawlessly using tonal or complementary theory.
-    4. Transit Engineering: The "transit_outfit" must balance long-haul comfort with arrival elegance. Use stretch fabrics, but keep the silhouette sharp and presentable for immediate hotel check-in or dining.
-    5. Strategic Gaps (Missing Pieces): When identifying "missing_pieces", prioritize destination-specific luxury essentials missing from the Vault. E.g., if traveling to the Mediterranean, explicitly recommend linen trousers, a luxury leather timepiece, or polarized resort eyewear to complete the aesthetic.
-    6. Dynamic Itinerary Mapping: Generate distinct outfit combinations for EACH day of the trip based on the itinerary duration. Reuse individual pieces intelligently, but avoid repeating the exact same full outfit.
+    2. Long-Haul Transit Protocol: Define the 'transit_outfit' by MAXIMUM PHYSICAL COMFORT. Collared button-up dress shirts are explicitly DISALLOWED for transit. You MUST utilize soft T-shirts or technical base layers paired with quarter-zips or pullovers for layering. 
+    3. Footwear & Formality Constraint Check: Strictly validate outfit combinations against the available footwear capsule. Identify major aesthetic mismatches. DO NOT suggest structured dress shirts/button-ups paired with Birkenstocks/sandals or athletic white sneakers for non-beach settings. If an evening requires an "elegant" look but no appropriate dress shoes exist in the vault, note this as a critical "Wardrobe Gap" rather than generating a clashing outfit.
+    4. Technical Wardrobe Indexing: For daytime activities defined as "Beach," "Sightseeing," "Exploration," or "Tours," aggressively prioritize uploaded T-shirts, activity-specific shirts, and pullovers over structured collared shirts. Default to technical, casual, and comfort fabrics for all excursions.
+    5. Capsule Logic Adjustment: Lean heavily into a "True Casual" capsule for vacations. Ensure the generated combination roster uses distinct casual/technical shirts before repeating any collar shirt options for daytime. Reserve button-ups strictly for designated dinners or upscale evenings.
+    6. Strategic Gaps (Missing Pieces): When identifying "missing_pieces", prioritize destination-specific luxury essentials missing from the Vault. E.g., if traveling to the Mediterranean, explicitly recommend linen trousers, a luxury leather timepiece, or polarized resort eyewear to complete the aesthetic.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
