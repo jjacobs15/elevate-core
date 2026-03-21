@@ -14,7 +14,7 @@ dotenv.config();
 const app = express();
 
 // ==========================================
-//   ENVIRONMENT & FOUNDATION
+//  ENVIRONMENT & FOUNDATION
 // ==========================================
 const REQUIRED_ENVS = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "REMOVE_BG_API_KEY"];
 for (const env of REQUIRED_ENVS) {
@@ -72,7 +72,7 @@ app.get("/health", (req, res) => {
 });
 
 // ==========================================
-//   SECURITY MIDDLEWARE
+//  SECURITY MIDDLEWARE
 // ==========================================
 const requireAuth = async (req, res, next) => {
     try {
@@ -120,7 +120,7 @@ const ProfileUpdateSchema = z.object({
 });
 
 // ==========================================
-//   USER PROFILE & MEASUREMENTS
+//  USER PROFILE & MEASUREMENTS
 // ==========================================
 
 app.get("/api/user/profile", async (req, res, next) => {
@@ -166,7 +166,7 @@ app.post("/api/user/profile", async (req, res, next) => {
 });
 
 // ==========================================
-//   STUDIO POLISH 
+//  STUDIO POLISH 
 // ==========================================
 app.post("/api/remove-bg", async (req, res, next) => {
   try {
@@ -199,7 +199,7 @@ app.post("/api/remove-bg", async (req, res, next) => {
 });
 
 // ==========================================
-//   AUTO-TAGGING & CARE TAG
+//  AUTO-TAGGING & CARE TAG
 // ==========================================
 app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
   try {
@@ -209,6 +209,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
     const safeImage = cleanBase64(image);
     const imageBuffer = Buffer.from(safeImage, "base64");
 
+    // UPGRADED SCHEMA: Capturing travel-critical comfort data
     const TaggingSchema = z.object({
       primary_color: z.string().describe("The dominant color"),
       secondary_color: z.string().nullable().describe("The accent color, or null"),
@@ -216,6 +217,8 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
       seasonality: z.enum(["Summer", "Winter", "All-Season", "Fall/Spring"]),
       fabric_weight_category: z.enum(["Heavyweight", "Midweight", "Lightweight", "Tropical"]),
       drape_index: z.number().min(1).max(10).describe("1 = Stiff/Structured, 10 = Flowing/Unstructured"),
+      wrinkle_resistance: z.number().min(1).max(10).describe("1 = Wrinkles easily (Linen), 10 = Highly wrinkle-resistant (Synthetics/Wool blends)"),
+      stretch_factor: z.enum(["None", "Low", "Medium", "High"]),
       estimated_lifespan_wears: z.number().describe("Estimated wears before needing replacement")
     });
 
@@ -227,7 +230,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
             { 
               role: "user", 
               content: [
-                { type: "text", text: "Analyze this garment. Identify its visual properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
+                { type: "text", text: "Analyze this garment. Identify its visual and material properties. STRICT DIRECTIVE: IGNORE ANY HUMAN IN THE PHOTO." },
                 { type: "image", image: imageBuffer } 
               ] 
             }
@@ -240,7 +243,7 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
         res.json({ success: true, tags: {
             primary_color: "Unknown", secondary_color: null, pattern: "Solid",
             seasonality: "All-Season", fabric_weight_category: "Midweight",
-            drape_index: 5, estimated_lifespan_wears: 100
+            drape_index: 5, wrinkle_resistance: 5, stretch_factor: "None", estimated_lifespan_wears: 100
         }});
     }
   } catch (error) {
@@ -289,7 +292,7 @@ app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
 });
 
 // ==========================================
-//   GHOST SIMULATION (ANCHOR PIECE CURATOR)
+//  GHOST SIMULATION (ANCHOR PIECE CURATOR)
 // ==========================================
 app.post("/api/designer/ghost-simulation", async (req, res, next) => {
   try {
@@ -356,7 +359,7 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 });
 
 // ==========================================
-//   CHRONOS & VALET 
+//  CHRONOS & VALET 
 // ==========================================
 app.get("/api/analytics/chronos", async (req, res, next) => {
   try {
@@ -464,7 +467,7 @@ app.post("/api/ledger/reset", async (req, res, next) => {
 });
 
 // ==========================================
-//   CORE AI STYLING ENGINE (CHAT)
+//  CORE AI STYLING ENGINE (CHAT)
 // ==========================================
 app.post("/api/chat", async (req, res, next) => {
   const reqId = crypto.randomUUID();
@@ -499,13 +502,16 @@ app.post("/api/chat", async (req, res, next) => {
 
     let vaultContext = "No wardrobe items available.";
     
+    // Auto-fetch vault context if necessary
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
+        // Includes newly tagged material properties to aid the Master Planner
         const { data: vaultItems } = await req.supabase
-            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
+            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern, drape_index, wrinkle_resistance, stretch_factor")
             .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
         if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
     } 
 
+    // --- ARCHITECTURAL UPGRADE: DYNAMIC SCHEMAS ---
     let dynamicJSONSchema = "";
     if (data.mode === 'fit') {
       dynamicJSONSchema = `{
@@ -520,6 +526,25 @@ app.post("/api/chat", async (req, res, next) => {
         },
         "alteration_blueprint": ["Take in waist 1.5 inches", "Specific tailor instruction 2"],
         "missing_pieces": ["A piece that would improve this silhouette"]
+      }`;
+    } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
+      // NEW: Specific travel schema forcing the Transit Outfit and Capsule Roster
+      dynamicJSONSchema = `{
+        "score": 90,
+        "tier": "Elite",
+        "verdict": "A brief summary of the travel capsule's versatility and comfort.",
+        "archetype": "The Jetsetter",
+        "transit_outfit": {
+            "description": "Comfort-optimized airport look",
+            "item_ids": ["exact_id_from_vault_1", "exact_id_from_vault_2"]
+        },
+        "capsule_roster": ["exact_id_from_vault_1", "exact_id_from_vault_2", "exact_id_from_vault_3"],
+        "outfit_combinations": [
+          { "name": "Day 1 (Arrival & Dinner)", "reasoning": "Why this works", "item_ids": ["exact_id_from_vault_2", "exact_id_from_vault_3"] }
+        ],
+        "styling_notes": ["Note on packing light", "Note on fabric comfort"],
+        "missing_pieces": ["Missing piece for acquisition board"],
+        "acquisition_list": []
       }`;
     } else {
       dynamicJSONSchema = `{
@@ -554,8 +579,13 @@ app.post("/api/chat", async (req, res, next) => {
     OFFICE CURATION DIRECTIVE: You MUST generate EXACTLY 5 distinct outfit combinations (one for each workday, Mon-Fri). Do not stop at Day 1. Your 'outfit_combinations' array MUST contain exactly 5 complete objects. Name them "Day 1", "Day 2", etc.
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
+        // ARCHITECTURAL UPGRADE: The Comfort & Utility Matrix injected into styling core.
         modeSpecificInstructions = `
-    TRIP CURATOR DIRECTIVE: You MUST generate distinct outfit combinations for EACH day of the trip based on the itinerary duration provided in the notes. Do not stop at Day 1. Your 'outfit_combinations' array MUST contain multiple complete objects covering the entire trip length. Name them "Day 1", "Day 2", etc.
+    TRIP CURATOR DIRECTIVE - THE COMFORT & UTILITY MATRIX:
+    1. Transit Engineering: You MUST map out a distinct "transit_outfit" utilizing stretch fabrics, wrinkle-resistant materials, breathable layers, and highly practical footwear from the Vault.
+    2. The Capsule Multiplier: Curate a unified "capsule_roster". Maximize versatility. Prioritize items that can effortlessly transition from daytime exploration to upscale evening wear.
+    3. Climate & Comfort Intelligence: Cross-reference the destination's climate context. Strictly prioritize breathable, comfortable fabrics (e.g., lightweight cotton, linen) for warm climates, and strategic modular layering (merino wools, cardigans) for cold climates over rigid pieces.
+    4. Itinerary Mapping: Generate distinct outfit combinations for EACH day of the trip based on the itinerary duration in the notes. Do not stop at Day 1. 
     CRITICAL: For EVERY item you select, you MUST copy its exact string "id" from the Available Wardrobe JSON into the "item_ids" array.`;
     } else if (data.mode === 'acquisition_board') {
         modeSpecificInstructions = `
