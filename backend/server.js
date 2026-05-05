@@ -16,7 +16,11 @@ const app = express();
 // ==========================================
 //   ENVIRONMENT & FOUNDATION
 // ==========================================
-const REQUIRED_ENVS = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "REMOVE_BG_API_KEY"];
+const REQUIRED_ENVS = [
+    "OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", 
+    "SUPABASE_SERVICE_ROLE_KEY", "REMOVE_BG_API_KEY"
+];
+
 for (const env of REQUIRED_ENVS) {
   if (!process.env[env]) {
     console.error(`❌ FATAL: Missing ${env}. Engine cannot ignite.`);
@@ -24,27 +28,32 @@ for (const env of REQUIRED_ENVS) {
   }
 }
 
+// Persistent Admin Client (High-Performance)
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false } }
 );
 
-// Trust proxy is critical when deployed behind Vercel/Railway load balancers
+// Trust proxy for load balancers (Vercel/Railway)
 app.set("trust proxy", 1); 
 
-// Security Headers (Disabled CSP to prevent blockages with inline base64 images if needed on the client, but highly secure otherwise)
-app.use(helmet({ contentSecurityPolicy: false }));
+// Hardened Security Headers
+app.use(helmet({ 
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false // Disabled for client inline base64, re-enable if migrating to pure URL delivery
+}));
 
-// Expanded payload limits to seamlessly accommodate high-res bespoke garment uploads
+// Accommodate high-res bespoke garment uploads
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // ==========================================
-//   CORS ARCHITECTURE (HARDENED)
+//   CORS ARCHITECTURE (ZERO-FRICTION)
 // ==========================================
 const allowedOrigins = [
     process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, "") : null,
-    "https://elevate-stylist.vercel.app", // Fallback for production stability
+    "https://elevate-stylist.vercel.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -53,28 +62,36 @@ const allowedOrigins = [
 
 app.use(cors({ 
     origin: function(origin, callback) {
-        // Allow server-to-server requests (!origin) or whitelisted frontend origins
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            console.warn(`[Vault Security] Blocked unauthorized origin handshake: ${origin}`);
-            // Return false instead of an Error to allow standard CORS rejection without crashing Express
+            console.warn(`[Vault Security] Blocked unauthorized origin: ${origin}`);
             callback(null, false);
         }
     }, 
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     credentials: true,
-    optionsSuccessStatus: 200 // Legacy browser support for 204 No Content preflights
+    optionsSuccessStatus: 200
 }));
 
-// Rate Limiting to protect AI Quotas
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30, 
+// ==========================================
+//   STRATIFIED TRAFFIC CONTROL
+// ==========================================
+const standardLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120, 
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "The atelier is currently at capacity. Please wait a moment." }
+  message: { error: "API capacity reached. Please hold." }
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000, 
+  max: 20, 
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "The atelier is currently at compute capacity. Please wait a moment." }
 });
 
 const cleanBase64 = (imageString) => {
@@ -82,17 +99,15 @@ const cleanBase64 = (imageString) => {
     return imageString.includes('base64,') ? imageString.split('base64,')[1] : imageString;
 };
 
-// Telemetry endpoint
 app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ONLINE", message: "EleVate Engine is operational and listening." });
+    res.status(200).json({ status: "ONLINE", message: "EleVate Engine is operational." });
 });
 
 // ==========================================
-//   SECURITY MIDDLEWARE
+//   IDENTITY & ACCESS GUARD
 // ==========================================
 const requireAuth = async (req, res, next) => {
     try {
-        // Preflight OPTIONS requests handled safely by CORS middleware, but ensure auth bypasses correctly if needed
         if (req.method === 'OPTIONS') return next();
 
         const authHeader = req.headers.authorization;
@@ -102,13 +117,10 @@ const requireAuth = async (req, res, next) => {
 
         const token = authHeader.split(" ")[1];
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+        
         if (error || !user) throw new Error("Invalid session token.");
 
-        // Attach a user-scoped Supabase client to the request to enforce Row Level Security (RLS)
-        req.supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
-            global: { headers: { Authorization: `Bearer ${token}` } }
-        });
-        
+        // Attach user object for strict query isolation later
         req.user = user;
         next();
     } catch (err) {
@@ -117,7 +129,7 @@ const requireAuth = async (req, res, next) => {
     }
 };
 
-app.use("/api", limiter, requireAuth);
+app.use("/api", standardLimiter, requireAuth);
 
 // ==========================================
 //   DATA SCHEMAS
@@ -147,17 +159,18 @@ const ProfileUpdateSchema = z.object({
 // ==========================================
 app.get("/api/user/profile", async (req, res, next) => {
   try {
-    const { data, error } = await req.supabase
+    const { data, error } = await supabaseAdmin
       .from("profiles") 
       .select("measurements, silhouette_id, preferences")
       .eq("id", req.user.id) 
       .single();
 
-    if (error && error.code !== 'PGRST116') {
-        throw new Error(error.message);
-    }
+    if (error && error.code !== 'PGRST116') throw new Error(error.message);
 
-    res.json({ success: true, profile: data || { measurements: {}, silhouette_id: null, preferences: { fits: [], brands: [], additional: [] } } });
+    res.json({ 
+        success: true, 
+        profile: data || { measurements: {}, silhouette_id: null, preferences: { fits: [], brands: [], additional: [] } } 
+    });
   } catch (error) {
     next(error);
   }
@@ -167,7 +180,7 @@ app.post("/api/user/profile", async (req, res, next) => {
   try {
     const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
-    const { data, error } = await req.supabase
+    const { data, error } = await supabaseAdmin
       .from("profiles") 
       .upsert({
         id: req.user.id, 
@@ -189,7 +202,7 @@ app.post("/api/user/profile", async (req, res, next) => {
 // ==========================================
 //   STUDIO POLISH 
 // ==========================================
-app.post("/api/remove-bg", async (req, res, next) => {
+app.post("/api/remove-bg", aiLimiter, async (req, res, next) => {
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "No image provided for processing." });
@@ -222,7 +235,7 @@ app.post("/api/remove-bg", async (req, res, next) => {
 // ==========================================
 //   AUTO-TAGGING & CARE TAG
 // ==========================================
-app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
+app.post("/api/wardrobe/auto-tag", aiLimiter, async (req, res, next) => {
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "Image required for Vault tagging." });
@@ -269,13 +282,12 @@ app.post("/api/wardrobe/auto-tag", async (req, res, next) => {
   }
 });
 
-app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
+app.post("/api/ledger/analyze-care-tag", aiLimiter, async (req, res, next) => {
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "Image required for Care Tag scanner." });
 
-    const safeImage = cleanBase64(image);
-    const imageBuffer = Buffer.from(safeImage, "base64");
+    const imageBuffer = Buffer.from(cleanBase64(image), "base64");
 
     const CareTagSchema = z.object({
       careProfile: z.object({
@@ -312,25 +324,25 @@ app.post("/api/ledger/analyze-care-tag", async (req, res, next) => {
 // ==========================================
 //   GHOST SIMULATION (ANCHOR PIECE CURATOR)
 // ==========================================
-app.post("/api/designer/ghost-simulation", async (req, res, next) => {
+app.post("/api/designer/ghost-simulation", aiLimiter, async (req, res, next) => {
   try {
     const { ghostItemImageBase64, ghostItemDescription, userPreferences } = req.body;
     if (!ghostItemImageBase64) return res.status(400).json({ error: "Image required to instantiate Ghost Simulation." });
 
-    const safeImage = cleanBase64(ghostItemImageBase64);
-    const imageBuffer = Buffer.from(safeImage, "base64");
+    const imageBuffer = Buffer.from(cleanBase64(ghostItemImageBase64), "base64");
 
     let vaultContext = "No existing wardrobe items available.";
-    const { data: vaultItems } = await req.supabase
+    const { data: vaultItems } = await supabaseAdmin
         .from("my_closet")
         .select("category, notes, primary_color, pattern")
+        .eq("user_id", req.user.id)
         .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
         .limit(50);
         
-    if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+    if (vaultItems?.length) vaultContext = JSON.stringify(vaultItems);
 
     let prefsContext = "";
-    if (userPreferences && (userPreferences.fits?.length || userPreferences.brands?.length || userPreferences.additional?.length)) {
+    if (userPreferences?.fits?.length || userPreferences?.brands?.length || userPreferences?.additional?.length) {
         prefsContext = `
     CRITICAL USER STYLE DNA DIRECTIVE:
     - Preferred Fits: ${userPreferences.fits?.join(", ") || "None specified"}
@@ -377,11 +389,12 @@ app.post("/api/designer/ghost-simulation", async (req, res, next) => {
 // ==========================================
 //   CHRONOS & VALET 
 // ==========================================
-app.get("/api/analytics/chronos", async (req, res, next) => {
+app.get("/api/analytics/chronos", aiLimiter, async (req, res, next) => {
   try {
-    const { data: dossiers, error } = await req.supabase
+    const { data: dossiers, error } = await supabaseAdmin
       .from("wardrobe_analyses")
       .select("score, verdict, created_at")
+      .eq("user_id", req.user.id)
       .not("score", "is", null)
       .order("created_at", { ascending: false })
       .limit(10);
@@ -409,10 +422,7 @@ app.get("/api/analytics/chronos", async (req, res, next) => {
           role: "system",
           content: `You are EleVate's Chronos AI. Analyze this user's recent outfit scores and verdicts to determine their aesthetic trajectory: ${JSON.stringify(dossiers)}`
         },
-        {
-          role: "user",
-          content: "Generate the Chronos Aesthetic Trajectory analysis."
-        }
+        { role: "user", content: "Generate the Chronos Aesthetic Trajectory analysis." }
       ],
       temperature: 0.3,
     });
@@ -430,10 +440,11 @@ app.post("/api/ledger/increment", async (req, res, next) => {
     const { itemId } = req.body;
     if (!itemId) return res.status(400).json({ error: "itemId is required to increment wear cycle." });
 
-    const { data: item, error: fetchError } = await req.supabase
+    const { data: item, error: fetchError } = await supabaseAdmin
       .from("my_closet")
       .select("category, wear_count, total_wears, wear_threshold, price") 
       .eq("id", itemId)
+      .eq("user_id", req.user.id) // Security enforcement
       .single();
 
     if (fetchError || !item) return res.status(404).json({ error: "Garment not found in Vault." });
@@ -445,10 +456,11 @@ app.post("/api/ledger/increment", async (req, res, next) => {
     const currentPrice = item.price || 0;
     const newCpw = currentPrice > 0 ? parseFloat((currentPrice / newTotalWears).toFixed(2)) : null;
 
-    const { data: updatedItem, error: updateError } = await req.supabase
+    const { data: updatedItem, error: updateError } = await supabaseAdmin
       .from("my_closet")
       .update({ wear_count: newWearCount, total_wears: newTotalWears, status: newStatus, cost_per_wear: newCpw })
       .eq("id", itemId)
+      .eq("user_id", req.user.id)
       .select()
       .single();
 
@@ -463,12 +475,16 @@ app.post("/api/ledger/nightstand-log", async (req, res, next) => {
   try {
     const { itemIds } = req.body;
     for (const id of itemIds) {
-        const { data: item } = await req.supabase.from("my_closet").select("*").eq("id", id).single();
+        const { data: item } = await supabaseAdmin.from("my_closet").select("*").eq("id", id).eq("user_id", req.user.id).single();
         if (!item) continue;
         const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
         const newWearCount = (item.wear_count || 0) + 1;
         const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
-        await req.supabase.from("my_closet").update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus }).eq("id", id);
+        
+        await supabaseAdmin.from("my_closet")
+            .update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus })
+            .eq("id", id)
+            .eq("user_id", req.user.id);
     }
     res.json({ success: true });
   } catch (error) { next(error); }
@@ -477,7 +493,10 @@ app.post("/api/ledger/nightstand-log", async (req, res, next) => {
 app.post("/api/ledger/reset", async (req, res, next) => {
   try {
     const { itemIds } = req.body;
-    await req.supabase.from("my_closet").update({ wear_count: 0, status: 'CLEAN' }).in('id', itemIds);
+    await supabaseAdmin.from("my_closet")
+        .update({ wear_count: 0, status: 'CLEAN' })
+        .in('id', itemIds)
+        .eq('user_id', req.user.id);
     res.json({ success: true });
   } catch (error) { next(error); }
 });
@@ -485,7 +504,7 @@ app.post("/api/ledger/reset", async (req, res, next) => {
 // ==========================================
 //   CORE AI STYLING ENGINE (STREAMING CHAT)
 // ==========================================
-app.post("/api/chat", async (req, res, next) => {
+app.post("/api/chat", aiLimiter, async (req, res, next) => {
   const reqId = crypto.randomUUID();
   console.log(`[${reqId}] Ignite: ${req.body.mode} stream requested by user ${req.user.id}`);
 
@@ -493,7 +512,7 @@ app.post("/api/chat", async (req, res, next) => {
     const data = RequestSchema.parse(req.body);
     const vaultPlaceholder = "https://dummyimage.com/600x400/020617/c5a059.png&text=Wardrobe+Curated+Outfit";
 
-    const { error: initialDbError } = await req.supabase
+    const { error: initialDbError } = await supabaseAdmin
       .from("wardrobe_analyses")
       .insert([{
         id: reqId, user_id: req.user.id, mode: data.mode, occasion: data.occasion || null,
@@ -504,15 +523,15 @@ app.post("/api/chat", async (req, res, next) => {
 
     const safeImage = cleanBase64(data.image);
 
-    // Asynchronous image upload (non-blocking for stream speed)
+    // Asynchronous image upload
     if (safeImage) {
       const imageBuffer = Buffer.from(safeImage, "base64");
       const fileName = `${req.user.id}/${reqId}.jpg`; 
-      req.supabase.storage.from("wardrobe_images").upload(fileName, imageBuffer, { contentType: "image/jpeg", upsert: false })
+      supabaseAdmin.storage.from("wardrobe_images").upload(fileName, imageBuffer, { contentType: "image/jpeg", upsert: false })
         .then(async ({ error: uploadError }) => {
           if (!uploadError) {
-             const { data: { publicUrl } } = req.supabase.storage.from("wardrobe_images").getPublicUrl(fileName);
-             await req.supabase.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
+             const { data: { publicUrl } } = supabaseAdmin.storage.from("wardrobe_images").getPublicUrl(fileName);
+             await supabaseAdmin.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
           }
         }).catch(err => console.error(`[${reqId}] Storage upload faulted:`, err.message));
     }
@@ -520,33 +539,29 @@ app.post("/api/chat", async (req, res, next) => {
     let vaultContext = "No wardrobe items available.";
     
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
-        const { data: vaultItems } = await req.supabase
-            .from("my_closet").select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
-            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")').order("total_wears", { ascending: true }).limit(50);
-        if (vaultItems && vaultItems.length > 0) vaultContext = JSON.stringify(vaultItems);
+        const { data: vaultItems } = await supabaseAdmin
+            .from("my_closet")
+            .select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
+            .eq("user_id", req.user.id)
+            .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
+            .order("total_wears", { ascending: true })
+            .limit(50);
+            
+        if (vaultItems?.length) vaultContext = JSON.stringify(vaultItems);
     } 
 
-    // Dynamic AI Prompting Setup...
-    let dynamicJSONSchema = "";
-    if (data.mode === 'fit') {
-      dynamicJSONSchema = `{ "score": 85, "tier": "Refined", "verdict": "...", "archetype": "The Executive", "fit_anatomy": { "shoulders_and_chest": ["..."], "waist_and_torso": ["..."], "legs_and_hem": ["..."] }, "alteration_blueprint": ["..."], "missing_pieces": ["..."] }`;
-    } else {
-      dynamicJSONSchema = `{ "score": 90, "tier": "Elite", "verdict": "...", "archetype": "The Executive", "breakdown": { "color": 18, "occasion": 18, "fit": 18, "cohesion": 18, "presence": 18 }, "styling_notes": ["..."], "outfit_combinations": [ { "name": "Day 1 Look", "reasoning": "...", "item_ids": ["..."] } ], "what_works": ["..."], "recommendations": ["..."], "missing_pieces": ["..."], "acquisition_list": [ { "item": "...", "priority": "High", "reasoning": "..." } ] }`;
-    }
+    let dynamicJSONSchema = data.mode === 'fit' 
+      ? `{ "score": 85, "tier": "Refined", "verdict": "...", "archetype": "The Executive", "fit_anatomy": { "shoulders_and_chest": ["..."], "waist_and_torso": ["..."], "legs_and_hem": ["..."] }, "alteration_blueprint": ["..."], "missing_pieces": ["..."] }`
+      : `{ "score": 90, "tier": "Elite", "verdict": "...", "archetype": "The Executive", "breakdown": { "color": 18, "occasion": 18, "fit": 18, "cohesion": 18, "presence": 18 }, "styling_notes": ["..."], "outfit_combinations": [ { "name": "Day 1 Look", "reasoning": "...", "item_ids": ["..."] } ], "what_works": ["..."], "recommendations": ["..."], "missing_pieces": ["..."], "acquisition_list": [ { "item": "...", "priority": "High", "reasoning": "..." } ] }`;
 
     let modeSpecificInstructions = "";
-    if (data.mode === 'match_vibe') {
-        modeSpecificInstructions = `MATCH MY VIBE DIRECTIVE: Extract partner's aesthetic. Map directly to user's Vault. CRITICAL: Copy exact string "id" into "item_ids".`;
-    } else if (data.mode === 'office_curation') {
-        modeSpecificInstructions = `OFFICE CURATION DIRECTIVE: Generate EXACTLY 5 distinct outfits (Mon-Fri). CRITICAL: Copy exact string "id" into "item_ids".`;
-    } else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') {
-        modeSpecificInstructions = `TRIP CURATOR DIRECTIVE: Generate distinct outfits for EACH day. CRITICAL: Copy exact string "id" into "item_ids".`;
-    } else if (data.mode === 'acquisition_board') {
-        modeSpecificInstructions = `ACQUISITION BOARD DIRECTIVE: Identify EXACTLY 5 distinct items to buy. Do not recommend items already owned.`;
-    }
+    if (data.mode === 'match_vibe') modeSpecificInstructions = `MATCH MY VIBE DIRECTIVE: Extract partner's aesthetic. Map directly to user's Vault. CRITICAL: Copy exact string "id" into "item_ids".`;
+    else if (data.mode === 'office_curation') modeSpecificInstructions = `OFFICE CURATION DIRECTIVE: Generate EXACTLY 5 distinct outfits (Mon-Fri). CRITICAL: Copy exact string "id" into "item_ids".`;
+    else if (data.mode === 'travel_curator' || data.mode === 'work_trip_curator') modeSpecificInstructions = `TRIP CURATOR DIRECTIVE: Generate distinct outfits for EACH day. CRITICAL: Copy exact string "id" into "item_ids".`;
+    else if (data.mode === 'acquisition_board') modeSpecificInstructions = `ACQUISITION BOARD DIRECTIVE: Identify EXACTLY 5 distinct items to buy. Do not recommend items already owned.`;
 
     let prefsContext = "";
-    if (data.userPreferences && (data.userPreferences.fits?.length || data.userPreferences.brands?.length || data.userPreferences.additional?.length)) {
+    if (data.userPreferences?.fits?.length || data.userPreferences?.brands?.length || data.userPreferences?.additional?.length) {
         prefsContext = `CRITICAL DNA: Fits: ${data.userPreferences.fits?.join(", ")}. Brands: ${data.userPreferences.brands?.join(", ")}. Rules: ${data.userPreferences.additional?.join(", ")}. MUST weave these preferences into output.`;
     }
 
@@ -570,12 +585,11 @@ app.post("/api/chat", async (req, res, next) => {
     const messages = [{ role: "system", content: systemPrompt }];
     
     if (safeImage) {
-        const aiBuffer = Buffer.from(safeImage, "base64");
         messages.push({
             role: "user",
             content: [
                 { type: "text", text: `Analyze context. Notes: ${data.notes || 'None'}.` },
-                { type: "image", image: aiBuffer } 
+                { type: "image", image: Buffer.from(safeImage, "base64") } 
             ]
         });
     } else {
@@ -591,11 +605,10 @@ app.post("/api/chat", async (req, res, next) => {
         });
 
         // ==========================================
-        //  PRODUCTION STREAMING HEADERS (ZERO-BUFFER)
+        //   PRODUCTION STREAMING HEADERS
         // ==========================================
         res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Transfer-Encoding', 'chunked');
-        // Vercel proxy override: Forces raw pipe without buffering
         res.setHeader('Cache-Control', 'no-transform, no-cache, no-store, must-revalidate'); 
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -619,20 +632,23 @@ app.post("/api/chat", async (req, res, next) => {
     try {
         // AI Hallucination Defense: Aggressive Markdown Stripper
         let cleanJson = fullResponse.trim();
-        cleanJson = cleanJson.replace(/^```(json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+        cleanJson = cleanJson.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
         
-        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-        if (jsonMatch) cleanJson = jsonMatch[0];
+        const firstBrace = cleanJson.indexOf('{');
+        const lastBrace = cleanJson.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+            cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+        }
         
         const parsedJson = JSON.parse(cleanJson);
-        await req.supabase.from("wardrobe_analyses").update({ 
+        await supabaseAdmin.from("wardrobe_analyses").update({ 
             full_analysis: parsedJson, 
             score: parsedJson.score || null, 
             tier: parsedJson.tier || null, 
             verdict: parsedJson.verdict || "Analysis Complete"
-        }).eq("id", reqId);
+        }).eq("id", reqId).eq("user_id", req.user.id);
     } catch (e) {
-        console.warn(`[${reqId}] Async JSON write bypassed. AI formatting deviation detected.`);
+        console.warn(`[${reqId}] Async JSON write bypassed. AI formatting deviation detected. Raw: ${fullResponse.substring(0, 50)}...`);
     }
 
   } catch (err) { 
@@ -658,6 +674,5 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 ELEVATE ENGINE ONLINE: PORT ${PORT}. Architect systems nominal.`); 
 });
 
-// Critical for long-running AI streams traversing load balancers
 server.keepAliveTimeout = 120000; 
 server.headersTimeout = 125000;
