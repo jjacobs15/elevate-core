@@ -1364,6 +1364,17 @@ function renderCareInstructions(item) {
     </div>
   `;
 }
+export async function terminateSession() {
+  // 1. Terminate Supabase session
+  await supabase.auth.signOut();
+  
+  // 2. Obliterate local storage and session storage
+  localStorage.clear();
+  sessionStorage.clear();
+  
+  // 3. Force a hard reload to clear any memory-held variables
+  window.location.href = '/login.html';
+}
 
 function openVaultItemDetail(id) {
   const item = STATE.cachedVaultInventory.find((entry) => entry.id === id);
