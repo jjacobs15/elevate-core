@@ -28,20 +28,19 @@ for (const env of REQUIRED_ENVS) {
   }
 }
 
-// Persistent Admin Client (High-Performance)
+// Admin Client: Strictly for Auth Verification and Admin-only Storage tasks
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
 
-// Trust proxy for load balancers (Vercel/Railway)
 app.set("trust proxy", 1); 
 
 // Hardened Security Headers
 app.use(helmet({ 
     crossOriginResourcePolicy: { policy: "cross-origin" },
-    contentSecurityPolicy: false // Disabled for client inline base64, re-enable if migrating to pure URL delivery
+    contentSecurityPolicy: false // Disabled for client inline base64
 }));
 
 // Accommodate high-res bespoke garment uploads
@@ -79,7 +78,7 @@ app.use(cors({
 //   STRATIFIED TRAFFIC CONTROL
 // ==========================================
 const standardLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000, 
   max: 120, 
   standardHeaders: true,
   legacyHeaders: false,
@@ -104,7 +103,7 @@ app.get("/health", (req, res) => {
 });
 
 // ==========================================
-//   IDENTITY & ACCESS GUARD
+//   IDENTITY & ACCESS GUARD (ZERO-TRUST)
 // ==========================================
 const requireAuth = async (req, res, next) => {
     try {
@@ -116,12 +115,25 @@ const requireAuth = async (req, res, next) => {
         }
 
         const token = authHeader.split(" ")[1];
-        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
         
+        // 1. Verify token authenticity
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
         if (error || !user) throw new Error("Invalid session token.");
 
-        // Attach user object for strict query isolation later
+        // 2. Attach user payload for contextual tracking
         req.user = user;
+
+        // 3. CRITICAL: Instantiate User-Scoped Client. 
+        // This enforces PostgreSQL Row Level Security (RLS) on all downstream DB calls.
+        req.supabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: { headers: { Authorization: `Bearer ${token}` } },
+                auth: { persistSession: false }
+            }
+        );
+
         next();
     } catch (err) {
         console.error("[Auth Guard]", err.message);
@@ -159,7 +171,8 @@ const ProfileUpdateSchema = z.object({
 // ==========================================
 app.get("/api/user/profile", async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    // RLS Enforcement: req.supabase automatically scopes to req.user.id
+    const { data, error } = await req.supabase
       .from("profiles") 
       .select("measurements, silhouette_id, preferences")
       .eq("id", req.user.id) 
@@ -180,7 +193,7 @@ app.post("/api/user/profile", async (req, res, next) => {
   try {
     const { measurements, silhouette_id, preferences } = ProfileUpdateSchema.parse(req.body);
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await req.supabase
       .from("profiles") 
       .upsert({
         id: req.user.id, 
@@ -240,8 +253,7 @@ app.post("/api/wardrobe/auto-tag", aiLimiter, async (req, res, next) => {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "Image required for Vault tagging." });
 
-    const safeImage = cleanBase64(image);
-    const imageBuffer = Buffer.from(safeImage, "base64");
+    const imageBuffer = Buffer.from(cleanBase64(image), "base64");
 
     const TaggingSchema = z.object({
       primary_color: z.string().describe("The dominant color"),
@@ -332,10 +344,11 @@ app.post("/api/designer/ghost-simulation", aiLimiter, async (req, res, next) => 
     const imageBuffer = Buffer.from(cleanBase64(ghostItemImageBase64), "base64");
 
     let vaultContext = "No existing wardrobe items available.";
-    const { data: vaultItems } = await supabaseAdmin
+    // RLS Enforcement: Inherently prevents accessing another user's closet
+    const { data: vaultItems } = await req.supabase
         .from("my_closet")
         .select("category, notes, primary_color, pattern")
-        .eq("user_id", req.user.id)
+        .eq("user_id", req.user.id) // Defense in depth
         .not("status", "in", '("NEEDS_CARE", "OUT_FOR_CLEANING")')
         .limit(50);
         
@@ -391,7 +404,7 @@ app.post("/api/designer/ghost-simulation", aiLimiter, async (req, res, next) => 
 // ==========================================
 app.get("/api/analytics/chronos", aiLimiter, async (req, res, next) => {
   try {
-    const { data: dossiers, error } = await supabaseAdmin
+    const { data: dossiers, error } = await req.supabase
       .from("wardrobe_analyses")
       .select("score, verdict, created_at")
       .eq("user_id", req.user.id)
@@ -440,11 +453,11 @@ app.post("/api/ledger/increment", async (req, res, next) => {
     const { itemId } = req.body;
     if (!itemId) return res.status(400).json({ error: "itemId is required to increment wear cycle." });
 
-    const { data: item, error: fetchError } = await supabaseAdmin
+    const { data: item, error: fetchError } = await req.supabase
       .from("my_closet")
       .select("category, wear_count, total_wears, wear_threshold, price") 
       .eq("id", itemId)
-      .eq("user_id", req.user.id) // Security enforcement
+      .eq("user_id", req.user.id)
       .single();
 
     if (fetchError || !item) return res.status(404).json({ error: "Garment not found in Vault." });
@@ -456,7 +469,7 @@ app.post("/api/ledger/increment", async (req, res, next) => {
     const currentPrice = item.price || 0;
     const newCpw = currentPrice > 0 ? parseFloat((currentPrice / newTotalWears).toFixed(2)) : null;
 
-    const { data: updatedItem, error: updateError } = await supabaseAdmin
+    const { data: updatedItem, error: updateError } = await req.supabase
       .from("my_closet")
       .update({ wear_count: newWearCount, total_wears: newTotalWears, status: newStatus, cost_per_wear: newCpw })
       .eq("id", itemId)
@@ -475,13 +488,13 @@ app.post("/api/ledger/nightstand-log", async (req, res, next) => {
   try {
     const { itemIds } = req.body;
     for (const id of itemIds) {
-        const { data: item } = await supabaseAdmin.from("my_closet").select("*").eq("id", id).eq("user_id", req.user.id).single();
+        const { data: item } = await req.supabase.from("my_closet").select("*").eq("id", id).eq("user_id", req.user.id).single();
         if (!item) continue;
         const limit = item.wear_threshold || WEAR_THRESHOLDS[item.category] || WEAR_THRESHOLDS["Default"];
         const newWearCount = (item.wear_count || 0) + 1;
         const newStatus = newWearCount >= limit ? "NEEDS_CARE" : "WORN";
         
-        await supabaseAdmin.from("my_closet")
+        await req.supabase.from("my_closet")
             .update({ wear_count: newWearCount, total_wears: (item.total_wears || 0) + 1, status: newStatus })
             .eq("id", id)
             .eq("user_id", req.user.id);
@@ -493,7 +506,7 @@ app.post("/api/ledger/nightstand-log", async (req, res, next) => {
 app.post("/api/ledger/reset", async (req, res, next) => {
   try {
     const { itemIds } = req.body;
-    await supabaseAdmin.from("my_closet")
+    await req.supabase.from("my_closet")
         .update({ wear_count: 0, status: 'CLEAN' })
         .in('id', itemIds)
         .eq('user_id', req.user.id);
@@ -512,7 +525,7 @@ app.post("/api/chat", aiLimiter, async (req, res, next) => {
     const data = RequestSchema.parse(req.body);
     const vaultPlaceholder = "https://dummyimage.com/600x400/020617/c5a059.png&text=Wardrobe+Curated+Outfit";
 
-    const { error: initialDbError } = await supabaseAdmin
+    const { error: initialDbError } = await req.supabase
       .from("wardrobe_analyses")
       .insert([{
         id: reqId, user_id: req.user.id, mode: data.mode, occasion: data.occasion || null,
@@ -523,7 +536,7 @@ app.post("/api/chat", aiLimiter, async (req, res, next) => {
 
     const safeImage = cleanBase64(data.image);
 
-    // Asynchronous image upload
+    // Asynchronous image upload (Requires Admin client as storage RLS is often handled separately)
     if (safeImage) {
       const imageBuffer = Buffer.from(safeImage, "base64");
       const fileName = `${req.user.id}/${reqId}.jpg`; 
@@ -531,7 +544,8 @@ app.post("/api/chat", aiLimiter, async (req, res, next) => {
         .then(async ({ error: uploadError }) => {
           if (!uploadError) {
              const { data: { publicUrl } } = supabaseAdmin.storage.from("wardrobe_images").getPublicUrl(fileName);
-             await supabaseAdmin.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
+             // Ensure database update runs through user-scoped client
+             await req.supabase.from("wardrobe_analyses").update({ image_url: publicUrl }).eq("id", reqId);
           }
         }).catch(err => console.error(`[${reqId}] Storage upload faulted:`, err.message));
     }
@@ -539,7 +553,7 @@ app.post("/api/chat", aiLimiter, async (req, res, next) => {
     let vaultContext = "No wardrobe items available.";
     
     if (["wardrobe_builder", "travel_curator", "office_curation", "work_trip_curator", "morning_briefing", "acquisition_board", "match_vibe"].includes(data.mode)) {
-        const { data: vaultItems } = await supabaseAdmin
+        const { data: vaultItems } = await req.supabase
             .from("my_closet")
             .select("id, image_url, category, notes, status, total_wears, primary_color, pattern")
             .eq("user_id", req.user.id)
@@ -641,7 +655,7 @@ app.post("/api/chat", aiLimiter, async (req, res, next) => {
         }
         
         const parsedJson = JSON.parse(cleanJson);
-        await supabaseAdmin.from("wardrobe_analyses").update({ 
+        await req.supabase.from("wardrobe_analyses").update({ 
             full_analysis: parsedJson, 
             score: parsedJson.score || null, 
             tier: parsedJson.tier || null, 
