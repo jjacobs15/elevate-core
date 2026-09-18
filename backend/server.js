@@ -682,6 +682,20 @@ app.use((err, req, res, next) => {
       res.status(500).json({ error: "Internal server anomaly. The Master Ledger has logged the incident." });
   }
 });
+// ✅ Correct Implementation: Explicitly filtering by the verified req.user.id
+app.get("/api/vault", requireAuth, async (req, res, next) => {
+  try {
+    const { data: vaultItems, error } = await supabaseAdmin
+        .from("my_closet")
+        .select("*")
+        .eq("user_id", req.user.id); // Critical filter
+
+    if (error) throw error;
+    res.json({ items: vaultItems });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const PORT = process.env.PORT || 8080;
 const server = app.listen(PORT, "0.0.0.0", () => { 
